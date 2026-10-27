@@ -1,0 +1,23 @@
+# Environment & secrets
+.env*
+!.env_setup.example
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Profile snapshots (contain saves + configs)
+profiles_store/
+
+# Generated
+download_mods.txt
+last_setup.json
+pending_setups.json
+
+# Logs
+*.log
+logs/
+
+# Windows
+Thumbs.db
+Desktop.ini
