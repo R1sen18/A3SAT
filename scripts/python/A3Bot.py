@@ -16,9 +16,48 @@ from dotenv import load_dotenv
 # restart/status/uptime/players), setup wizard, and backup/restore profiles.
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env_setup"))
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-AUTHORIZED_USER_IDS = [int(x.strip()) for x in os.getenv("AUTHORIZED_USER_IDS", "").split(",")]
-GUILD_ID = os.getenv("GUILD_ID")
+
+def _config_error(message: str) -> SystemExit:
+    """A bad .env_setup should say what to fix — a traceback in a3bot_stderr.log
+    under an auto-restarting service tells the admin nothing."""
+    return SystemExit(f"[config] {message}\n"
+                      f"[config] Edit {os.path.join(os.path.dirname(__file__), '.env_setup')} "
+                      f"(or re-run install.ps1) and restart the service.")
+
+
+def _require_env(name: str) -> str:
+    value = (os.getenv(name) or "").strip()
+    if not value:
+        raise _config_error(f"{name} is not set.")
+    return value
+
+
+def _require_id(name: str) -> int:
+    value = _require_env(name)
+    if not value.isdigit():
+        raise _config_error(f"{name} must be a numeric Discord ID, got {value!r}.")
+    return int(value)
+
+
+def _require_ids(name: str) -> list[int]:
+    raw = _require_env(name)
+    ids = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if not part.isdigit():
+            raise _config_error(
+                f"{name} must be numeric Discord IDs separated by commas, got {part!r}.")
+        ids.append(int(part))
+    if not ids:
+        raise _config_error(f"{name} contains no Discord IDs.")
+    return ids
+
+
+BOT_TOKEN = _require_env("BOT_TOKEN")
+AUTHORIZED_USER_IDS = _require_ids("AUTHORIZED_USER_IDS")
+GUILD_ID = _require_id("GUILD_ID")
 SERVICE_NAME = os.getenv("SERVICE_NAME", "Arma3Server")
 HC_SERVICE_NAME = os.getenv("HC_SERVICE_NAME", "Arma3HeadlessClient")
 QUERY_HOST = os.getenv("QUERY_HOST", "127.0.0.1")
@@ -28,7 +67,11 @@ QUERY_PORT = int(os.getenv("QUERY_PORT", "2303"))
 STEAM_USERNAME = os.getenv("STEAM_USERNAME", "")
 # Server passwords come from .env_setup (set by install.ps1) — never via Discord.
 SERVER_PASSWORD = os.getenv("SERVER_PASSWORD", "")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "changeme")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+# Placeholders from .env_setup.example: writing one of these into server.cfg
+# would hand #login admin rights to anyone who can read this repo.
+PLACEHOLDER_ADMIN_PASSWORDS = {"changeme", "change_me", "password", "admin",
+                               "your_admin_password_here"}
 
 # Project root = two levels up from this file (…\A3SAT2\scripts\python\A3Setup.py)
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -108,6 +151,22 @@ class Missions
 
 
 # ---------------------------------------------------------------- helpers
+
+def write_text_atomic(path: str, content: str, encoding: str = "utf-8"):
+    """Write a config/state file without ever leaving a truncated one behind.
+
+    Opening the target directly in "w" truncates it before the first byte is
+    written, so an encoding error or a crash mid-write destroys the previous
+    contents — fatal for server.cfg and last_setup.json. Encode first, then
+    replace the file in one step."""
+    data = content.encode(encoding)
+    tmp = f"{path}.tmp"
+    with open(tmp, "wb") as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
 
 def sanitize_cfg_value(value: str) -> str:
     """Strip characters that could break out of a server.cfg string literal.
@@ -243,7 +302,10 @@ VANILLA_WORLDS = {"altis", "stratis", "malden", "tanoa", "enoch", "vr",
                   "cam_lao_nam", "spe_normandy", "spe_mortain", "sefrouramal",
                   "gm_weferlingen_summer", "gm_weferlingen_winter"}
 
-_world_cache: dict[str, bool] = {}
+# Keyed by (world, mod set): a "not found" verdict is only valid for the exact
+# set of folders that was scanned, or adding the missing terrain mod later would
+# keep returning the stale False.
+_world_cache: dict[tuple[str, tuple[str, ...]], bool] = {}
 
 
 def world_available(world: str, mod_folders: list[str]) -> bool | None:
@@ -252,12 +314,13 @@ def world_available(world: str, mod_folders: list[str]) -> bool | None:
     Terrain pbos contain 'worlds\\<name>\\<name>.wrp', and a pbo's file list
     sits in its header, so reading the first chunk of each pbo is enough.
     Returns None when we can't tell (nothing scannable on disk)."""
-    key = world.lower()
-    if key in VANILLA_WORLDS:
+    world_key = world.lower()
+    if world_key in VANILLA_WORLDS:
         return True
+    key = (world_key, tuple(sorted(f.lower() for f in mod_folders)))
     if key in _world_cache:
         return _world_cache[key]
-    needle = f"{key}.wrp".encode()
+    needle = f"{world_key}.wrp".encode()
     scanned_any = False
     for folder in mod_folders:
         mod_dir = os.path.join(SERVER_BASE, folder)
@@ -410,8 +473,18 @@ def restore_profile(folder_name: str) -> tuple[bool, str]:
 
     saves_backup = os.path.join(folder, "saves")
     if os.path.isdir(saves_backup):
-        shutil.copytree(saves_backup, SAVES_DIR, dirs_exist_ok=True)
-        changes.append("saves")
+        # Replace, don't merge: merging left every save file the snapshot does
+        # not contain in place, so a newer campaign save could survive a
+        # rollback and be loaded again by autoLoadLastGame. The caller has
+        # already taken an auto_pre_restore snapshot of what is being replaced.
+        try:
+            if os.path.isdir(SAVES_DIR):
+                shutil.rmtree(SAVES_DIR)
+            shutil.copytree(saves_backup, SAVES_DIR)
+            changes.append("saves")
+        except OSError as e:
+            changes.append(f"⚠️ saves NOT restored ({e.__class__.__name__} — is the server "
+                           f"still running?); the profile's other parts were applied")
 
     # Keys must match the restored mod set, not the previous one
     folders = mod_folders_from_params(sp) if params_ok else []
@@ -570,19 +643,29 @@ def save_last_setup(id_to_folder: dict[str, str], names: dict[str, str] | None =
     payload = {"applied_at": int(datetime.now().timestamp()), "mods": id_to_folder}
     # Display names let us regenerate a launcher preset later (/preset)
     payload["names"] = names if names is not None else load_last_names()
-    with open(LAST_SETUP_FILE, "w") as f:
-        json.dump(payload, f, indent=2)
+    # Written atomically: this file is saved right before a restart, and a
+    # half-written one used to break every command that reads it.
+    write_text_atomic(LAST_SETUP_FILE, json.dumps(payload, indent=2))
+
+
+def _read_last_setup() -> dict:
+    """The applied-setup state, or {} when it is missing or unreadable.
+
+    A truncated last_setup.json must not take down /update, /preset,
+    /checkupdates, /cleanup_workshop and /setup_map all at once."""
+    try:
+        with open(LAST_SETUP_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def load_last_names() -> dict[str, str]:
     """Workshop display names of the last applied setup (may be empty for
     setups applied before this was recorded)."""
-    if os.path.isfile(LAST_SETUP_FILE):
-        with open(LAST_SETUP_FILE) as f:
-            data = json.load(f)
-        if isinstance(data, dict):
-            return data.get("names", {})
-    return {}
+    names = _read_last_setup().get("names", {})
+    return names if isinstance(names, dict) else {}
 
 
 PRESET_HTML = """<?xml version="1.0" encoding="utf-8"?>
@@ -641,22 +724,18 @@ def build_preset_html(preset_name: str = "Server Mods") -> tuple[str, int]:
 
 def load_last_setup() -> dict[str, str]:
     """Returns {mod_id: folder} of the last applied setup."""
-    if os.path.isfile(LAST_SETUP_FILE):
-        with open(LAST_SETUP_FILE) as f:
-            data = json.load(f)
-        # Backward compat: old format was a flat {id: folder} dict
-        return data.get("mods", data) if isinstance(data, dict) else {}
-    return {}
+    data = _read_last_setup()
+    # Backward compat: old format was a flat {id: folder} dict
+    mods = data.get("mods", data)
+    return mods if isinstance(mods, dict) else {}
 
 
 def load_applied_at() -> int:
     """Unix timestamp of the last /setup_apply or /update (0 if unknown)."""
-    if os.path.isfile(LAST_SETUP_FILE):
-        with open(LAST_SETUP_FILE) as f:
-            data = json.load(f)
-        if isinstance(data, dict):
-            return int(data.get("applied_at", 0))
-    return 0
+    try:
+        return int(_read_last_setup().get("applied_at", 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 def find_outdated_mods() -> list[tuple[str, str, str]]:
@@ -675,12 +754,12 @@ def find_outdated_mods() -> list[tuple[str, str, str]]:
     return outdated
 
 
-def update_installed_mods(outdated_ids: list[str]) -> tuple[list[str], list[str]]:
+def update_installed_mods(outdated_ids: list[str]) -> tuple[list[str], list[str], list[str]]:
     """Re-copy updated mods from the workshop cache over their server @Folders.
     Only replaces a folder with a newer copy of the same mod.
-    Returns (updated, needs_download)."""
+    Returns (updated, needs_download, failed)."""
     mods = load_last_setup()
-    updated, needs_download = [], []
+    updated, needs_download, failed = [], [], []
     for mid in outdated_ids:
         folder = mods.get(mid)
         if not folder:
@@ -690,9 +769,28 @@ def update_installed_mods(outdated_ids: list[str]) -> tuple[list[str], list[str]
         if not workshop_ready(mid):
             needs_download.append(f"{folder} ({mid})")
             continue
-        if os.path.isdir(dest):
-            shutil.rmtree(dest)
-        shutil.copytree(src, dest)
+        # Move the old copy aside instead of deleting it in place: if the server
+        # is still holding a .pbo open, the move fails before anything is lost,
+        # where an in-place rmtree would leave a half-deleted mod the server
+        # can no longer load.
+        stale = f"{dest}.old"
+        try:
+            if os.path.isdir(stale):
+                shutil.rmtree(stale, ignore_errors=True)
+            if os.path.isdir(dest):
+                os.rename(dest, stale)
+        except OSError as e:
+            failed.append(f"{folder} ({e.__class__.__name__}: in use by the running server?)")
+            continue
+        try:
+            shutil.copytree(src, dest)
+        except OSError as e:
+            # Put the working copy back rather than leaving the mod missing
+            if os.path.isdir(stale) and not os.path.isdir(dest):
+                os.rename(stale, dest)
+            failed.append(f"{folder} ({e.__class__.__name__})")
+            continue
+        shutil.rmtree(stale, ignore_errors=True)
         for root, _, files in os.walk(dest):
             for f in files:
                 if f.lower().endswith(".bikey"):
@@ -700,9 +798,9 @@ def update_installed_mods(outdated_ids: list[str]) -> tuple[list[str], list[str]
         updated.append(folder)
     # Only refresh applied_at when nothing was skipped — otherwise skipped mods
     # would be considered up to date and never flagged again.
-    if updated and not needs_download:
+    if updated and not needs_download and not failed:
         save_last_setup(mods)
-    return updated, needs_download
+    return updated, needs_download, failed
 
 
 def cleanup_workshop() -> tuple[int, int, list[str]]:
@@ -817,9 +915,14 @@ def rebuild_keys(mod_folders: list[str]):
     (plus Arma's own a3.bikey). Prevents stale keys from previously loaded
     mods letting clients join with mods the server no longer runs."""
     os.makedirs(KEYS_DIR, exist_ok=True)
+    # A key the running server holds open must not abort the whole rebuild —
+    # a stale key left behind is far less harmful than a half-rebuilt keys\.
     for f in os.listdir(KEYS_DIR):
         if f.lower().endswith(".bikey") and not f.lower().startswith("a3"):
-            os.remove(os.path.join(KEYS_DIR, f))
+            try:
+                os.remove(os.path.join(KEYS_DIR, f))
+            except OSError as e:
+                print(f"[keys] Could not remove {f}: {e}", flush=True)
     for folder in mod_folders:
         mod_dir = os.path.join(SERVER_BASE, folder)
         if not os.path.isdir(mod_dir):
@@ -827,7 +930,10 @@ def rebuild_keys(mod_folders: list[str]):
         for root, _, files in os.walk(mod_dir):
             for f in files:
                 if f.lower().endswith(".bikey"):
-                    shutil.copy2(os.path.join(root, f), KEYS_DIR)
+                    try:
+                        shutil.copy2(os.path.join(root, f), KEYS_DIR)
+                    except OSError as e:
+                        print(f"[keys] Could not copy {f}: {e}", flush=True)
 
 
 def mod_folders_from_params(params: str) -> list[str]:
@@ -930,10 +1036,20 @@ async def start_server(followup: discord.Webhook, verb: str = "started"):
         await followup.send(f"Failed to start service: {e}")
 
 
-async def do_restart(followup: discord.Webhook):
-    """Stop-wait-start the server service, then watch joinability + HC."""
-    await stop_server_and_wait()
+async def do_restart(followup: discord.Webhook) -> bool:
+    """Stop-wait-start the server service, then watch joinability + HC.
+
+    Starting while the old process is still shutting down just fails on the
+    port, so a stop that never completed is reported rather than papered over
+    with a "restarted" message."""
+    if not await stop_server_and_wait():
+        await followup.send(
+            f"⚠️ Service '{SERVICE_NAME}' did not stop within 2 minutes — **not** starting it "
+            f"again, since that would fail on the still-bound port. Check the service, then "
+            f"use `/start`.")
+        return False
     await start_server(followup, verb="restarted")
+    return True
 
 
 # ---------------------------------------------------------------- bot state
@@ -1354,18 +1470,26 @@ async def setup_map(interaction: discord.Interaction, map: str | None = None):
     maps = await asyncio.to_thread(scan_available_maps, mod_source)
     if not maps:
         # Templates are read from the mission mod's files — they only become
-        # visible once the mods are on disk.
-        pending_dl = [mid for mid in cfg["mods"] if not workshop_ready(mid)]
-        if pending_dl:
+        # visible once the mods are on disk. Without a pending setup there is
+        # nothing left to download, so only the applied set can be reported on.
+        pending_dl = [mid for mid in mod_source if not workshop_ready(mid)]
+        if cfg and pending_dl:
             await interaction.response.send_message(
                 f"Maps can only be listed once the mods are downloaded "
                 f"({len(pending_dl)} still missing).\n"
                 f"**Next:** {'`/download`' if STEAM_USERNAME else '`/setup_script`, run it on the VM'}, "
                 f"then `/setup_map` again.", ephemeral=True)
             return
-        await interaction.response.send_message(
-            f"No mission templates found for this mod set — default `{cfg['template']}` will be used. "
-            f"Continue with `/setup_apply`.", ephemeral=True)
+        if cfg:
+            await interaction.response.send_message(
+                f"No mission templates found for this mod set — default `{cfg['template']}` will be used. "
+                f"Continue with `/setup_apply`.", ephemeral=True)
+        else:
+            missing = f" ({len(pending_dl)} of them no longer in the workshop cache)" if pending_dl else ""
+            await interaction.response.send_message(
+                f"No mission templates found in the applied mod set{missing}, so there is nothing "
+                f"to choose from. Edit the `template =` line in `server.cfg` by hand, or start a "
+                f"new setup with `/setup`.", ephemeral=True)
         return
 
     if map:
@@ -1424,8 +1548,7 @@ async def setup_map(interaction: discord.Interaction, map: str | None = None):
                 await interaction.followup.send(
                     "⚠️ Could not find a `template =` line in server.cfg — change it manually.")
                 return
-            with open(SERVER_CFG_PATH, "w", encoding="utf-8") as f:
-                f.write(new_content)
+            await asyncio.to_thread(write_text_atomic, SERVER_CFG_PATH, new_content)
         except OSError as e:
             await interaction.followup.send(f"⚠️ Could not update server.cfg: {e}")
             return
@@ -1514,10 +1637,31 @@ async def setup_apply(interaction: discord.Interaction, restart: bool = False):
                 f"**Next:** `/download` (or `/setup_script` on the VM), then `/setup_apply` again.")
             return
 
-    # 2. Always back up the current state before changing anything
+    # 2. Validate the passwords before anything is written. An unset or
+    #    placeholder admin password would go live as the #login secret, and a
+    #    server password the HC cannot pass on its command line would leave the
+    #    headless client permanently unable to join.
+    admin_pw = sanitize_cfg_value(ADMIN_PASSWORD)
+    if not admin_pw or admin_pw.lower() in PLACEHOLDER_ADMIN_PASSWORDS:
+        await interaction.followup.send(
+            "⛔ **`ADMIN_PASSWORD` is unset or still the example placeholder — nothing was "
+            "changed.**\nIt becomes the server's `#login` password, so anyone who knows the "
+            "default would get admin on the running server. Set a real one in `.env_setup` "
+            "and run `/setup_apply` again.")
+        return
+    server_pw = sanitize_cfg_value(SERVER_PASSWORD)
+    if server_pw != sanitize_param_value(server_pw):
+        await interaction.followup.send(
+            "⛔ **`SERVER_PASSWORD` contains characters the headless client cannot pass on "
+            "its command line (spaces, quotes or backslashes) — nothing was changed.**\n"
+            "The server would accept it while the HC was rejected and never joined. "
+            "Use a password of letters, digits and simple punctuation in `.env_setup`.")
+        return
+
+    # 3. Always back up the current state before changing anything
     backup_folder = await asyncio.to_thread(make_backup, "auto_pre_setup")
 
-    # 3. Install mods (copy from workshop dir; never deletes existing folders)
+    # 4. Install mods (copy from workshop dir; never deletes existing folders)
     installed, missing, id_to_folder = [], [], {}
     if cfg["mods"]:
         await interaction.followup.send(
@@ -1527,18 +1671,18 @@ async def setup_apply(interaction: discord.Interaction, restart: bool = False):
         installed, missing, id_to_folder = await asyncio.to_thread(
             install_mods_from_workshop, cfg["mods"])
 
-    # 4. Write server.cfg
+    # 5. Write server.cfg (atomic + UTF-8: a server name with an emoji must not
+    #    truncate the config half-way through the write)
     server_cfg = DEFAULT_SERVER_CFG.format(
         hostname=sanitize_cfg_value(cfg["hostname"]),
-        password=sanitize_cfg_value(SERVER_PASSWORD),
-        passwordAdmin=sanitize_cfg_value(ADMIN_PASSWORD),
+        password=server_pw,
+        passwordAdmin=admin_pw,
         maxPlayers=cfg["maxPlayers"],
         template=cfg["template"],
     )
-    with open(SERVER_CFG_PATH, "w") as f:
-        f.write(server_cfg)
+    await asyncio.to_thread(write_text_atomic, SERVER_CFG_PATH, server_cfg)
 
-    # 5. Update NSSM params
+    # 6. Update NSSM params
     nssm_note = ""
     if id_to_folder:
         mod_string = ";".join(sorted(id_to_folder.values()))
@@ -1547,7 +1691,10 @@ async def setup_apply(interaction: discord.Interaction, restart: bool = False):
         # which makes the HC fail with "Missing addons detected" and never join.
         hc_mods = mod_string
         server_params = f"-port=2302 -config=server.cfg -profiles=profiles -name=server -mod={mod_string}"
-        hc_params = (f"-client -connect=127.0.0.1 -port=2302 -password={sanitize_param_value(SERVER_PASSWORD)} "
+        # The HC must present exactly the password server.cfg sets. NSSM splits
+        # AppParameters on whitespace, so a password that cannot survive as a
+        # bare argument is reported instead of being silently altered.
+        hc_params = (f"-client -connect=127.0.0.1 -port=2302 -password={server_pw} "
                      f"-profiles=profiles_hc -name=hc -noSteam -mod={hc_mods}")
         ok1 = set_nssm_params(SERVICE_NAME, server_params)
         ok2 = set_nssm_params(HC_SERVICE_NAME, hc_params)
@@ -1634,6 +1781,18 @@ async def restore(interaction: discord.Interaction, folder: str):
         await interaction.followup.send(f"⚠️ Profile `{folder}` not found — see `/profiles`.")
         return
 
+    # Stop first: the saves and server.cfg being replaced are exactly the files
+    # a running server owns, and it would overwrite the restored saves on its
+    # next autosave.
+    was_running = "RUNNING" in await a_service_state(SERVICE_NAME)
+    if was_running:
+        await interaction.followup.send("⏹️ Stopping the server before restoring...")
+        if not await stop_server_and_wait():
+            await interaction.followup.send(
+                "⚠️ Server did not stop within 2 minutes — **nothing was restored**. "
+                "Stop it manually and run `/restore` again.")
+            return
+
     # Safety net: back up current state before restoring over it
     pre = await asyncio.to_thread(make_backup, "auto_pre_restore")
 
@@ -1644,7 +1803,8 @@ async def restore(interaction: discord.Interaction, folder: str):
     await interaction.followup.send(
         f"✅ Restored `{folder}` ({detail}).\n"
         f"Current state was backed up to `{os.path.basename(pre)}` first.\n"
-        f"Restart the server with `/restart` to go live."
+        + ("**Next:** `/start` to bring the server back up."
+           if was_running else "**Next:** `/start` to go live.")
     )
 
 
@@ -1735,11 +1895,11 @@ async def checkupdates(interaction: discord.Interaction):
     if not outdated:
         await interaction.followup.send("✅ All installed mods are up to date.")
         return
-    items = "\n".join(f"- **{title}** (`{folder}`)" for _, folder, title in outdated[:20])
+    items = "\n".join(f"- **{title[:80]}** (`{folder}`)" for _, folder, title in outdated[:20])
     more = f"\n...and {len(outdated) - 20} more" if len(outdated) > 20 else ""
     await interaction.followup.send(
-        f"🔄 **{len(outdated)} mods have updates on Steam:**\n{items}{more}\n\n"
-        f"**Next:** `/update` to download, install and restart in one go."
+        (f"🔄 **{len(outdated)} mods have updates on Steam:**\n{items}{more}\n\n"
+         f"**Next:** `/update` to download, install and restart in one go.")[:2000]
     )
 
 
@@ -1764,10 +1924,10 @@ async def update(interaction: discord.Interaction, restart: bool = True):
     if not outdated:
         await interaction.followup.send("✅ All installed mods are up to date.")
         return
-    items = "\n".join(f"- **{title}**" for _, _, title in outdated[:15])
+    items = "\n".join(f"- **{title[:80]}**" for _, _, title in outdated[:15])
     more = f"\n...and {len(outdated) - 15} more" if len(outdated) > 15 else ""
     await interaction.followup.send(
-        f"🔄 Updating **{len(outdated)} mods:**\n{items}{more}")
+        f"🔄 Updating **{len(outdated)} mods:**\n{items}{more}"[:2000])
 
     # 2. Download into the cache (automated route only)
     outdated_ids = [mid for mid, _, _ in outdated]
@@ -1779,9 +1939,22 @@ async def update(interaction: discord.Interaction, restart: bool = True):
                 f"Try `/update` again (SteamCMD login may have expired).")
             return
 
-    # 3. Install
+    # 3. Stop the server before replacing mod folders. A running Arma holds its
+    #    .pbo files open, so installing underneath it either fails outright or
+    #    pulls the addons out from under the live session.
+    was_running = "RUNNING" in await a_service_state(SERVICE_NAME)
+    if was_running:
+        await interaction.followup.send("⏹️ Stopping the server to install the updates...")
+        if not await stop_server_and_wait():
+            await interaction.followup.send(
+                "⚠️ Server did not stop within 2 minutes — **nothing was installed**. "
+                "Stop it manually and run `/update` again.")
+            return
+
+    # 4. Install
     await interaction.followup.send("⏳ Installing updates — this can take a few minutes...")
-    updated, needs_download = await asyncio.to_thread(update_installed_mods, outdated_ids)
+    updated, needs_download, failed = await asyncio.to_thread(
+        update_installed_mods, outdated_ids)
     if updated:
         # Refresh keys for the full current mod set (removes stale ones too)
         await asyncio.to_thread(rebuild_keys, sorted(load_last_setup().values()))
@@ -1792,14 +1965,19 @@ async def update(interaction: discord.Interaction, restart: bool = True):
         dl = "\n".join(f"- {m}" for m in needs_download[:10])
         parts.append(f"⚠️ Not in workshop cache (no `STEAM_USERNAME` for auto-download?) — "
                      f"run `/setup_script` output on the VM, then `/update` again:\n{dl}")
+    if failed:
+        fl = "\n".join(f"- {m}" for m in failed[:10])
+        parts.append(f"⛔ **{len(failed)} mods could not be replaced** (their previous copy was "
+                     f"kept, so the server still starts):\n{fl}")
 
-    # 4. Restart
-    do_it = restart and updated and not needs_download
+    # 5. Restart
+    do_it = restart and updated and not needs_download and not failed
     if not do_it:
-        parts.append("Run `/restart` to load the updated mods.")
+        parts.append(f"Run `/start` to bring the server back up."
+                     if was_running else "Run `/start` to load the updated mods.")
     await interaction.followup.send("\n".join(parts)[:2000])
     if do_it:
-        await do_restart(interaction.followup)
+        await start_server(interaction.followup, verb="restarted with the updated mods")
 
 
 @client.tree.command(name="preset", description="Export the server's current mod list as a launcher preset")
