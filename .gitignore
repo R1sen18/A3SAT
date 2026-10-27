@@ -12,7 +12,9 @@ profiles_store/
 # Generated
 download_mods.txt
 last_setup.json
+last_setup.json.tmp
 pending_setups.json
+server_preset.html
 
 # Logs
 *.log

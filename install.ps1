@@ -28,10 +28,23 @@ if (-not $python) {
     if (Test-Path $fallback) { $python = $fallback }
 }
 if (-not $python) {
-    Write-Host "Python not found in PATH or at the default location. Install Python 3.8+ first." -ForegroundColor Red
+    Write-Host "Python not found in PATH or at the default location. Install Python 3.10+ first." -ForegroundColor Red
     exit 1
 }
-Write-Host "Using Python: $python"
+# A3Bot.py uses PEP 604 unions (`bool | None`) in its signatures, which are
+# evaluated at import: on 3.9 or older the service restart-loops with a
+# TypeError that is only visible in a3bot_stderr.log. Fail here instead.
+$pyVer = (& $python -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>$null)
+if ($LASTEXITCODE -ne 0 -or -not $pyVer) {
+    Write-Host "Could not determine the Python version of $python." -ForegroundColor Red
+    exit 1
+}
+if ([version]$pyVer -lt [version]"3.10") {
+    Write-Host "Python $pyVer found at $python, but A3Bot needs 3.10 or newer." -ForegroundColor Red
+    Write-Host "Install a newer Python and make sure it comes first in PATH." -ForegroundColor Red
+    exit 1
+}
+Write-Host "Using Python: $python (version $pyVer)"
 
 # 3. Find nssm: next to this script first, then the A3SAT install
 $nssm = Join-Path $PSScriptRoot "nssm.exe"
