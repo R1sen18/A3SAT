@@ -31,9 +31,10 @@ def _read_cstring(f) -> bytes:
             raise _BadHeader
 
 
-def pbo_file_names(path: str) -> list[str]:
-    """File names listed in a PBO header. Truncated/garbled files yield a
-    partial list instead of raising."""
+def _pbo_header(path: str) -> tuple[list[str], bool]:
+    """(file names, complete). complete is False when the header could not be
+    read to its terminator (I/O error, garbled/oversized name, entry ceiling,
+    or truncation)."""
     names: list[str] = []
     try:
         with open(path, "rb") as f:
@@ -41,24 +42,31 @@ def pbo_file_names(path: str) -> list[str]:
                 name = _read_cstring(f)
                 block = f.read(20)
                 if len(block) < 20:
-                    break
+                    return names, False
                 method = int.from_bytes(block[:4], "little")
                 if name == b"":
                     if method == _PRODUCT_METHOD:
-                        while _read_cstring(f):
-                            pass
+                        while _read_cstring(f):  # key/value pairs; only an empty key ends them
+                            _read_cstring(f)
                         continue
-                    break
+                    return names, True
                 names.append(name.decode("latin-1"))
+            return names, False
     except (OSError, _BadHeader):
-        pass
-    return names
+        return names, False
+
+
+def pbo_file_names(path: str) -> list[str]:
+    """File names listed in a PBO header. Truncated/garbled files yield a
+    partial list instead of raising."""
+    return _pbo_header(path)[0]
 
 
 def world_available(world: str, mod_dirs: list[str]) -> bool | None:
     """Is the terrain for `world` provided by a pbo under any of these
     absolute directories? Terrain pbos contain a "worlds/<name>/<name>.wrp" entry.
-    Returns None when nothing was scannable on disk."""
+    Returns None when nothing was scannable on disk, or when no pbo matched but
+    some pbo header could not be fully parsed (can't verify)."""
     world_key = world.lower()
     if world_key in VANILLA_WORLDS:
         return True
@@ -67,6 +75,7 @@ def world_available(world: str, mod_dirs: list[str]) -> bool | None:
         return _world_cache[key]
     target = f"{world_key}.wrp"
     scanned_any = False
+    incomplete = False
     for mod_dir in mod_dirs:
         if not os.path.isdir(mod_dir):
             continue
@@ -75,11 +84,13 @@ def world_available(world: str, mod_dirs: list[str]) -> bool | None:
                 if not fname.lower().endswith(".pbo"):
                     continue
                 scanned_any = True
-                for name in pbo_file_names(os.path.join(root, fname)):
+                names, complete = _pbo_header(os.path.join(root, fname))
+                incomplete = incomplete or not complete
+                for name in names:
                     if name.replace("/", "\\").rsplit("\\", 1)[-1].lower() == target:
                         _world_cache[key] = True
                         return True
-    if not scanned_any:
+    if not scanned_any or incomplete:
         return None
     # Never cache False: the folder may still be downloading/being installed
     return False

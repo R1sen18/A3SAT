@@ -9,7 +9,7 @@ import asyncio
 import urllib.request
 import urllib.parse
 import a2s
-from terrain import VANILLA_WORLDS, world_available
+from terrain import world_available
 from datetime import datetime
 from dotenv import load_dotenv
 

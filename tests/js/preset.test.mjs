@@ -13,7 +13,8 @@ const A3BOT_ROW_RE = /data-type="DisplayName">([^<]+)<\/td>.*?\?id=(\d+)/gs;
 const fixture = () =>
   JSON.parse(fs.readFileSync(new URL("./fixtures/resolve-domini.json", import.meta.url), "utf8"));
 const golden = () => exportPlan(applyResolve(emptyState(), fixture(), "add")).included;
-const unesc = (s) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+// Mirrors A3Bot's parse_preset_html: only &amp; &lt; &gt; are decoded.
+const unesc = (s) => s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").trim();
 
 test("golden_export_passes_a3bot_checks", () => {
   const mods = golden();
@@ -28,8 +29,16 @@ test("golden_export_passes_a3bot_checks", () => {
 
 test("escapes_markup_in_titles", () => {
   const html = buildPresetHtml("n", [{ id: "1", title: 'A & B <x> "q"' }]);
-  assert.ok(html.includes("A &amp; B &lt;x&gt; &quot;q&quot;"));
+  assert.ok(html.includes('>A &amp; B &lt;x&gt; "q"</td>'));
   assert.ok(!html.includes("<x>"));
+});
+
+test("quote_in_title_survives_a3bot_unescape", () => {
+  const title = 'The "Best" Mod';
+  const html = buildPresetHtml("n", [{ id: "7", title }]);
+  const rows = [...html.matchAll(A3BOT_ROW_RE)];
+  assert.equal(rows.length, 1);
+  assert.equal(unesc(rows[0][1]), title);
 });
 
 test("round_trip_import", () => {

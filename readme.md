@@ -85,17 +85,25 @@ A3SAT2\
 
 ## Updating the bot on the VM
 
+In PowerShell, define the NSSM path once (it may instead be the `nssm.exe` in the
+bot folder, see the layout above):
+
+```powershell
+$nssm = "C:\steamgames\a3server\A3SAT\nssm.exe"
+```
+
 **Zip route** (no git needed):
 
-1. Stop the bot: `nssm stop A3Bot`.
+1. Stop the bot: `& $nssm stop A3Bot`.
 2. Back up the current bot folder (copy it somewhere safe).
 3. Download `https://github.com/R1sen18/A3SAT/archive/refs/heads/main.zip` and
    unzip it.
-4. Copy the **whole** unzipped folder over the bot folder, not just `A3Bot.py`
-   — the bot imports further modules (currently `scripts\python\terrain.py`).
+4. Copy the **contents** of the unzipped `A3SAT-main\` folder over the bot
+   folder, not just `A3Bot.py` — the bot imports further modules (currently
+   `scripts\python\terrain.py`).
 5. Delete `scripts\python\__pycache__`.
-6. Start the bot: `nssm start A3Bot`, then check `logs\a3bot_stderr.log` for the
-   `[config]` lines.
+6. Start the bot: `& $nssm start A3Bot`, then check `logs\a3bot_stderr.log` for
+   the `[config]` lines.
 
 `.env_setup`, `last_setup.json`, `pending_setups.json` and `profiles_store\` are
 untouched because they are not part of the download.
@@ -107,7 +115,9 @@ password (empty = public) and may use only letters, digits and simple
 punctuation — no spaces, quotes or backslashes, because the headless client gets
 it as a command-line argument.
 
-**Optional git route** — turn the bot folder into a checkout once:
+**Optional git route** — turn the bot folder into a checkout once. Back up the
+folder first (as in the zip route): `git checkout -f` overwrites local edits to
+tracked files (e.g. a hand-edited `A3Bot.py`).
 
 ```powershell
 git init
@@ -117,7 +127,11 @@ git checkout -f -B main origin/main
 ```
 
 Gitignored state (`.env_setup`, the JSON state files, `profiles_store\`, `logs\`)
-is untouched. Later updates are `git pull` followed by `nssm restart A3Bot`.
+is untouched. Later updates are `git pull` followed by `& $nssm restart A3Bot`.
+
+If git reports "dubious ownership", run
+`git config --global --add safe.directory C:/steamgames/a3server/A3SAT2`
+(adjust the path to the bot folder).
 
 
 ## Commands
@@ -270,7 +284,7 @@ Core, Libertad - SA - Horse, Renaissance Of Warfare and Domini Antistasi.
 (workshop copy plus installed copy). `/cleanup_workshop` frees the workshop copy
 afterwards.
 
-**Flow:** attach `presets/domini_antistasi.html` to `/setup`, then
+**Flow:**
 
 ```
 /setup  (attach presets/domini_antistasi.html)
@@ -283,7 +297,9 @@ Faction choice happens in-game, not in the bot.
 
 Lessons from a real setup:
 
-- Domini Antistasi needs **Antistasi Ultimate 12.4.1**. The bot never replaces
+- Domini Antistasi needs the Antistasi Ultimate version the patch targets
+  (12.4.1 at time of writing; the server log's `[DOMINI] Target AU …` line shows
+  it). The bot never replaces
   an existing mod folder, so a leftover older `@AntistasiUltimateMod` from a
   previous setup is kept, the mission fails with `[DOMINI] INCOMPATIBLE AU SOURCE`
   lines in the server RPT and no role can be selected. Fix: stop the server

@@ -70,3 +70,9 @@ test("cycle_is_deterministic", () => {
   assert.deepEqual(ids(exportOrder([a, b])), ["1", "2"]);
   assert.deepEqual(ids(exportOrder([b, a])), ["1", "2"]);
 });
+
+test("applyResolve_ignores_non_numeric_keys", () => {
+  const resp = { roots: [], items: { "../x": { title: "evil", appId: 107410 }, "123": { title: "ok", appId: 107410 } } };
+  const s = applyResolve(emptyState(), resp, "add");
+  assert.deepEqual(Object.keys(s.mods), ["123"]);
+});

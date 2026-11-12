@@ -7,7 +7,17 @@ import {
 import { WORKER_URL } from "./config.js";
 
 const $ = (id) => document.getElementById(id);
-const api = (new URLSearchParams(location.search).get("api") || WORKER_URL || "").replace(/\/$/, "");
+// ?api= is honoured only for local development (http://localhost or 127.0.0.1).
+function apiOverride() {
+  const raw = new URLSearchParams(location.search).get("api");
+  if (!raw) return "";
+  try {
+    const u = new URL(raw);
+    if (u.protocol === "http:" && (u.hostname === "localhost" || u.hostname === "127.0.0.1")) return raw;
+  } catch { /* not a URL */ }
+  return "";
+}
+const api = (apiOverride() || WORKER_URL || "").replace(/\/$/, "");
 let state = emptyState();
 let busy = false;
 const titleCache = {}; // titles seen from Steam, so a removed mod can still be named in "missing:"
@@ -47,13 +57,12 @@ function showError(msg) { $("error").textContent = msg || ""; }
 async function runAdd(ids) {
   showError("");
   $("trunc").textContent = "";
-  let next = state, truncated = false;
+  let truncated = false;
   for (const part of chunk(ids, 50)) {
     const resp = await fetchResolve(part, true);
     truncated = truncated || !!resp.truncated;
-    next = applyResolve(next, resp, "add");
+    state = applyResolve(state, resp, "add"); // merge into the current state, not a pre-await snapshot
   }
-  state = next;
   if (truncated) $("trunc").textContent = "Warning: the lookup hit its limit, so some requirements may be missing from the list. Check the warnings below.";
 }
 
@@ -115,6 +124,7 @@ function renderMod(m) {
   meta.textContent = m.resolved ? `${fmtSize(m.size)} · updated ${fmtDate(m.updated)}` : "";
   const rm = el("button", { onclick: () => onRemove(m.id) });
   rm.textContent = "Remove";
+  rm.disabled = busy;
   const li = el("li", { class: "mod" }, el("div", { class: "line" }, title, rm), meta);
 
   const badge = (text, cls = "badge") => { const b = el("span", { class: cls }); b.textContent = text; li.append(b); return b; };
@@ -128,6 +138,7 @@ function renderMod(m) {
     badge("missing: " + missing.map(label).join(", "), "badge warn");
     const btn = el("button", { onclick: () => guarded(() => runAdd(missing)) });
     btn.textContent = "Add missing";
+    btn.disabled = busy;
     li.append(el("div", { class: "row" }, btn));
   }
   return li;
@@ -187,7 +198,7 @@ $("import").addEventListener("change", onImport);
 $("export").addEventListener("click", onExport);
 $("name").addEventListener("input", render);
 $("copy").addEventListener("click", async () => {
-  try { await navigator.clipboard.writeText(location.href); $("copy").textContent = "Copied"; }
+  try { await navigator.clipboard.writeText(location.origin + location.pathname + location.hash); $("copy").textContent = "Copied"; }
   catch { $("copy").textContent = "Copy the address bar"; }
   setTimeout(() => ($("copy").textContent = "Copy share link"), 2000);
 });

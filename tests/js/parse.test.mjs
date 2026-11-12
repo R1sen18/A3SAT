@@ -25,6 +25,11 @@ test("parseInput ignores URL without id=", () => {
   assert.deepEqual(parseInput(url), { ids: [], ignored: [url] });
 });
 
+test("parseInput reads id= not appid=", () => {
+  const url = "https://steamcommunity.com/sharedfiles/filedetails/?appid=107410&id=450814997";
+  assert.deepEqual(parseInput(url), { ids: ["450814997"], ignored: [] });
+});
+
 test("chunk splits into batches", () => {
   const ids = Array.from({ length: 120 }, (_, i) => String(i + 1));
   assert.deepEqual(chunk(ids, 50).map((c) => c.length), [50, 50, 20]);

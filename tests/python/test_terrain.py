@@ -54,6 +54,23 @@ class PboFileNamesTests(unittest.TestCase):
         self.assertEqual(terrain.pbo_file_names(self.path()), ["config.bin"])
 
 
+class ProductEntryTests(unittest.TestCase):
+    def test_empty_value_in_product_entry_does_not_end_skip_early(self):
+        block = struct.pack("<5I", 0, 0, 0, 0, 0)
+        data = (b"\0" + struct.pack("<5I", 0x56657273, 0, 0, 0, 0)
+                + b"prefix\0x\0version\0\0"   # key "version" has an empty value
+                + b"\0"                          # empty key ends the pairs
+                + b"worlds/x/x.wrp\0" + block
+                + b"\0" + bytes(20))
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "a.pbo")
+            with open(p, "wb") as f:
+                f.write(data)
+            self.assertEqual(terrain.pbo_file_names(p), ["worlds/x/x.wrp"])
+            terrain._world_cache.clear()
+            self.assertIs(terrain.world_available("x", [d]), True)
+
+
 class HugeNameTests(unittest.TestCase):
     def test_pbo_file_names_stops_on_unterminated_huge_name(self):
         block = struct.pack("<5I", 0, 0, 0, 0, 0)
@@ -102,6 +119,17 @@ class WorldAvailableTests(unittest.TestCase):
         self.assertIs(terrain.world_available("1400_ad_ostmarschen", [a]), False)
         make_pbo(os.path.join(a, "terrain.pbo"), ["config.bin", WRP])
         self.assertIs(terrain.world_available("1400_ad_ostmarschen", [a]), True)
+
+    def test_truncated_pbo_without_match_returns_none(self):
+        a = self.mkdir("A")
+        p = os.path.join(a, "t.pbo")
+        make_pbo(p, ["config.bin", WRP])
+        with open(p, "rb") as f:
+            data = f.read()
+        cut = data.index(b"config.bin") + len(b"config.bin\0") + 20 + 5
+        with open(p, "wb") as f:
+            f.write(data[:cut])
+        self.assertIsNone(terrain.world_available("other_world", [a]))
 
     def test_nothing_scannable_returns_none(self):
         a = self.mkdir("A")

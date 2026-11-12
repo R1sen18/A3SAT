@@ -8,7 +8,7 @@ export function parseInput(text) {
     for (const token of line.split(/[\s,]+/)) {
       if (!token) continue;
       let id = null;
-      const m = token.match(/id=(\d+)/);
+      const m = token.match(/(?:^|[?&])id=(\d+)/);
       if (m) id = m[1];
       else if (/^\d+$/.test(token)) id = token;
       if (id === null) {
@@ -78,6 +78,7 @@ export function applyResolve(state, response, mode) {
     if (item && item.isCollection) for (const c of item.contains || []) userIds.add(c);
   }
   for (const [id, item] of Object.entries(items)) {
+    if (!/^\d+$/.test(id)) continue;
     if (item.isCollection) continue;
     const existing = next.mods[id];
     if (mode === "load" && !existing) continue;
@@ -190,8 +191,10 @@ const PRESET_ROW = `        <tr data-type="ModContainer">
         </tr>
 `;
 
-const escHtml = (s) =>
-  String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+// Same escaping as A3Bot's builder: A3Bot's parser decodes only &amp; &lt; &gt;,
+// so row names must not contain &quot;. Attribute values additionally escape ".
+const escHtml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const escAttr = (s) => escHtml(s).replace(/"/g, "&quot;");
 const unescHtml = (s) =>
   s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&amp;/g, "&");
 
@@ -200,7 +203,7 @@ export function buildPresetHtml(name, mods) {
   const rows = mods
     .map((m) => PRESET_ROW.replace(/\{name\}/g, () => escHtml(m.title)).replace(/\{mid\}/g, () => m.id))
     .join("");
-  return PRESET_HTML.replace(/\{preset_name\}/g, () => escHtml(name)).replace("{rows}", () => rows);
+  return PRESET_HTML.replace(/\{preset_name\}/g, () => escAttr(name)).replace("{rows}", () => rows);
 }
 
 export function parsePresetHtml(html) {
