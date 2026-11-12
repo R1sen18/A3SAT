@@ -1,4 +1,4 @@
-# a3sat-modlist Worker
+# Modlist Worker (`a3sat`)
 
 Cloudflare Worker behind the modlist creator (`docs/modlist/`). It looks up Steam Workshop items and
 their required items, because browsers cannot call Steam's API (no CORS) and the dependency endpoint
@@ -15,7 +15,16 @@ and is not a proxy. Allowed origins come from `ALLOWED_ORIGINS` in `wrangler.tom
 3. `npx wrangler login`
 4. From `tools/modlist-worker`: `npx wrangler deploy`
 5. `npx wrangler secret put STEAM_API_KEY` and paste the key. It is stored only as a Worker secret.
+   (Or in the dashboard: Worker → Settings → Variables and Secrets → Add, type **Secret**.)
 6. Copy the `*.workers.dev` URL printed by deploy into `docs/modlist/config.js`.
+
+`name` in `wrangler.toml` must match the Worker's name in the dashboard.
+
+### Optional: deploy on push (Workers Builds)
+
+If the Worker is connected to the GitHub repo, set Worker → Settings → Build → **Root directory** to
+`tools/modlist-worker` (deploy command `npx wrangler deploy`). Builds of `main` fail until this folder
+is on `main`; a failed build leaves the running Worker untouched.
 
 ## Tests
 

@@ -1,6 +1,8 @@
-name = "a3sat-modlist"
+# Must match the Worker's name in the Cloudflare dashboard (Workers Builds refuses a mismatch).
+name = "a3sat"
 main = "worker.js"
 compatibility_date = "2026-11-01"
+workers_dev = true
 
 [vars]
 ALLOWED_ORIGINS = "https://r1sen18.github.io,http://localhost:*"
