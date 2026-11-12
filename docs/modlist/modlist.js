@@ -151,3 +151,68 @@ export function exportPlan(state) {
   const included = exportOrder(candidates);
   return { ok: unresolved.length === 0 && included.length > 0, unresolved, included, excluded };
 }
+
+// ---- Launcher preset export / import ----
+// Template copied from A3Bot's PRESET_HTML / PRESET_ROW (only the comment differs).
+const PRESET_HTML = `<?xml version="1.0" encoding="utf-8"?>
+<html>
+  <!--Created by A3SAT modlist creator-->
+  <head>
+    <meta name="arma:Type" content="preset" />
+    <meta name="arma:PresetName" content="{preset_name}" />
+    <meta name="generator" content="Arma 3 Launcher - https://arma3.com" />
+    <title>Arma 3</title>
+  </head>
+  <body>
+    <h1>Arma 3  - Preset <strong>{preset_name}</strong></h1>
+    <p class="before-list">
+      <em>To import this preset, drag this file onto the Launcher window. Or click the MODS tab, then PRESET in the top right, then IMPORT at the bottom, and finally select this file.</em>
+    </p>
+    <div class="mod-list">
+      <table>
+{rows}      </table>
+    </div>
+    <div class="footer">
+      <span>Created by Arma 3 Launcher by Bohemia Interactive.</span>
+    </div>
+  </body>
+</html>
+`;
+
+const PRESET_ROW = `        <tr data-type="ModContainer">
+          <td data-type="DisplayName">{name}</td>
+          <td>
+            <span class="from-steam">Steam</span>
+          </td>
+          <td>
+            <a href="https://steamcommunity.com/sharedfiles/filedetails/?id={mid}" data-type="Link">https://steamcommunity.com/sharedfiles/filedetails/?id={mid}</a>
+          </td>
+        </tr>
+`;
+
+const escHtml = (s) =>
+  String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const unescHtml = (s) =>
+  s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&amp;/g, "&");
+
+// Function replacers avoid "$&"-style patterns in titles being interpreted.
+export function buildPresetHtml(name, mods) {
+  const rows = mods
+    .map((m) => PRESET_ROW.replace(/\{name\}/g, () => escHtml(m.title)).replace(/\{mid\}/g, () => m.id))
+    .join("");
+  return PRESET_HTML.replace(/\{preset_name\}/g, () => escHtml(name)).replace("{rows}", () => rows);
+}
+
+export function parsePresetHtml(html) {
+  if (!/name="arma:Type"\s+content="(preset|list)"/.test(html.slice(0, 4096))) return null;
+  const nm = /name="arma:PresetName"\s+content="([^"]*)"/.exec(html);
+  const name = (nm && unescHtml(nm[1])) || "Server Mods";
+  const ids = [];
+  for (const r of html.matchAll(/data-type="DisplayName">([^<]+)<\/td>.*?\?id=(\d+)/gs)) ids.push(r[2]);
+  return { name, ids };
+}
+
+export function presetFilename(name) {
+  const base = String(name).replace(/[^A-Za-z0-9 _-]/g, "_");
+  return (base || "Server_Mods") + ".html";
+}
