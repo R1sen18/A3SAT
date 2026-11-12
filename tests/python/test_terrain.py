@@ -54,6 +54,15 @@ class PboFileNamesTests(unittest.TestCase):
         self.assertEqual(terrain.pbo_file_names(self.path()), ["config.bin"])
 
 
+class HugeNameTests(unittest.TestCase):
+    def test_pbo_file_names_stops_on_unterminated_huge_name(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "a.pbo")
+            with open(p, "wb") as f:
+                f.write(b"A" * 10000)
+            self.assertEqual(terrain.pbo_file_names(p), [])
+
+
 class WorldAvailableTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -81,6 +90,13 @@ class WorldAvailableTests(unittest.TestCase):
         a = self.mkdir("A")
         make_pbo(os.path.join(a, "cba.pbo"), ["config.bin"])
         self.assertIs(terrain.world_available("1400_ad_ostmarschen", [a]), False)
+
+    def test_false_is_not_cached(self):
+        a = self.mkdir("A")
+        make_pbo(os.path.join(a, "cba.pbo"), ["config.bin"])
+        self.assertIs(terrain.world_available("1400_ad_ostmarschen", [a]), False)
+        make_pbo(os.path.join(a, "terrain.pbo"), ["config.bin", WRP])
+        self.assertIs(terrain.world_available("1400_ad_ostmarschen", [a]), True)
 
     def test_nothing_scannable_returns_none(self):
         a = self.mkdir("A")

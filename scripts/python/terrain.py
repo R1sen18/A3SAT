@@ -6,13 +6,17 @@ VANILLA_WORLDS = {"altis", "stratis", "malden", "tanoa", "enoch", "vr",
                   "cam_lao_nam", "spe_normandy", "spe_mortain", "sefrouramal",
                   "gm_weferlingen_summer", "gm_weferlingen_winter"}
 
-# Keyed by (world, dir set): a "not found" verdict is only valid for the exact
-# set of directories that was scanned, or adding the missing terrain mod later
-# would keep returning the stale False.
+# Only positive results are cached (keyed by world + dir set); a False can go
+# stale when a mod folder finishes downloading or is installed later.
 _world_cache: dict[tuple[str, tuple[str, ...]], bool] = {}
 
 _PRODUCT_METHOD = 0x56657273  # 'Vers' — product entry carrying key/value strings
 _MAX_ENTRIES = 1_000_000
+_MAX_NAME = 4096
+
+
+class _BadHeader(Exception):
+    pass
 
 
 def _read_cstring(f) -> bytes:
@@ -44,7 +48,7 @@ def pbo_file_names(path: str) -> list[str]:
                         continue
                     break
                 names.append(name.decode("latin-1"))
-    except OSError:
+    except (OSError, _BadHeader):
         pass
     return names
 
@@ -75,5 +79,5 @@ def world_available(world: str, mod_dirs: list[str]) -> bool | None:
                         return True
     if not scanned_any:
         return None
-    _world_cache[key] = False
+    # Never cache False: the folder may still be downloading/being installed
     return False
