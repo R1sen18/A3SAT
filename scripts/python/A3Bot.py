@@ -9,6 +9,7 @@ import asyncio
 import urllib.request
 import urllib.parse
 import a2s
+from terrain import VANILLA_WORLDS, world_available
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -236,6 +237,18 @@ def build_folder_map(mods: dict[str, str]) -> dict[str, str]:
     return folder_map
 
 
+def terrain_dirs(mods: dict[str, str] | None, applied: dict[str, str]) -> list[str]:
+    """Existing directories that may hold a mod's terrain pbos: the workshop
+    copy (pending, not yet applied) and the installed @Folder."""
+    folder_map = build_folder_map(mods) if mods is not None else applied
+    dirs = []
+    for mod_id, folder in folder_map.items():
+        for d in (os.path.join(WORKSHOP_BASE, mod_id), os.path.join(SERVER_BASE, folder)):
+            if os.path.isdir(d):
+                dirs.append(d)
+    return dirs
+
+
 def get_nssm_params(service: str) -> str:
     """Read a service's AppParameters. nssm may print UTF-16LE or plain text
     depending on version/host, and a wrong decode yields plausible-looking
@@ -295,54 +308,6 @@ def extract_templates_from_mod(mod_dir: str) -> set[str]:
                 if world and world.lower() == name.split(".")[-1].lower():
                     found.add(name)
     return found
-
-
-# Worlds shipped by the base game / official DLC — always present
-VANILLA_WORLDS = {"altis", "stratis", "malden", "tanoa", "enoch", "vr",
-                  "cam_lao_nam", "spe_normandy", "spe_mortain", "sefrouramal",
-                  "gm_weferlingen_summer", "gm_weferlingen_winter"}
-
-# Keyed by (world, mod set): a "not found" verdict is only valid for the exact
-# set of folders that was scanned, or adding the missing terrain mod later would
-# keep returning the stale False.
-_world_cache: dict[tuple[str, tuple[str, ...]], bool] = {}
-
-
-def world_available(world: str, mod_folders: list[str]) -> bool | None:
-    """Is the terrain for `world` provided by any of these installed mods?
-
-    Terrain pbos contain 'worlds\\<name>\\<name>.wrp', and a pbo's file list
-    sits in its header, so reading the first chunk of each pbo is enough.
-    Returns None when we can't tell (nothing scannable on disk)."""
-    world_key = world.lower()
-    if world_key in VANILLA_WORLDS:
-        return True
-    key = (world_key, tuple(sorted(f.lower() for f in mod_folders)))
-    if key in _world_cache:
-        return _world_cache[key]
-    needle = f"{world_key}.wrp".encode()
-    scanned_any = False
-    for folder in mod_folders:
-        mod_dir = os.path.join(SERVER_BASE, folder)
-        if not os.path.isdir(mod_dir):
-            continue
-        for root, _, files in os.walk(mod_dir):
-            for fname in files:
-                if not fname.lower().endswith(".pbo"):
-                    continue
-                scanned_any = True
-                try:
-                    with open(os.path.join(root, fname), "rb") as fh:
-                        head = fh.read(512 * 1024)  # pbo header holds the file list
-                except OSError:
-                    continue
-                if needle in head.lower():
-                    _world_cache[key] = True
-                    return True
-    if not scanned_any:
-        return None
-    _world_cache[key] = False
-    return False
 
 
 def scan_available_maps(mods=None) -> dict[str, str]:
@@ -1502,10 +1467,9 @@ async def setup_map(interaction: discord.Interaction, map: str | None = None):
 
         # A mission for a terrain that isn't installed crashes the server at init
         world = template.split(".", 1)[1]
-        folders = (list(build_folder_map(cfg["mods"]).values()) if cfg
-                   else list(applied.values()))
         await interaction.response.defer(ephemeral=True)
-        has_world = await asyncio.to_thread(world_available, world, folders)
+        has_world = await asyncio.to_thread(world_available, world,
+                                           terrain_dirs(cfg["mods"] if cfg else None, applied))
         if has_world is False:
             await interaction.followup.send(
                 f"⛔ **`{world}` is not provided by any mod in this setup** — the server would "
