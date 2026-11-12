@@ -67,15 +67,15 @@ Only users in `AUTHORIZED_USER_IDS` can run commands.
 
 | Command | What it does |
 |---|---|
-| `/start` `/stop` `/restart` | Control the server; reports when joinable and restarts the headless client after 90 s |
+| `/start` `/stop` `/restart` | Control the server and headless client; reports when joinable, HC follows after 90 s |
 | `/status` `/uptime` `/players` | Service state, uptime, live player count |
 | `/setup preset:<file>` | Start a new setup from a launcher preset `.html` (optional name, max players) |
 | `/download` | Download the setup's mods with SteamCMD (needs `STEAM_USERNAME`) |
 | `/setup_script` | Manual alternative: a SteamCMD script to run on the VM |
 | `/setup_map [map]` | Pick the mission/map. Without a pending setup it switches the running server's map |
-| `/setup_apply [restart]` | Back up, install mods, rebuild `keys\`, write `server.cfg`, update services |
+| `/setup_apply [restart]` | Back up, install mods (replacing installed ones that are older), rebuild `keys\`, write `server.cfg`, update services |
 | `/update [restart]` | Check, download and install mod updates, rebuild keys, restart |
-| `/checkupdates` | List outdated mods without changing anything |
+| `/checkupdates` | List outdated mods without changing anything (per mod; see [how it works](docs/how-it-works.md#mod-versions-and-updates)) |
 | `/preset [name]` | Export the server's current mods as a launcher preset for players |
 | `/backup <name>` `/profiles` `/restore <folder>` | Snapshot and restore configurations (`/restore` backs up first) |
 | `/delete_profile <folder> confirm:true` | Delete a stored profile |
@@ -111,3 +111,5 @@ Passwords are never asked in Discord; they come from `.env_setup`.
 | Backup shows "0 mods" | Service parameters couldn't be read; that profile restores only `server.cfg` and saves |
 | `/players` fails | A2S answers only once a mission is loaded |
 | NSSM update failed | The bot service needs admin rights (LocalSystem) |
+| A mod needs a newer base mod (patch errors, no role) | An old copy is still installed: `/checkupdates`, then `/download` and `/update` or `/setup_apply` replace it |
+| Replacing a mod fails with "in use" (error 32) | Something still has it loaded, usually the headless client: `/stop` stops both |
