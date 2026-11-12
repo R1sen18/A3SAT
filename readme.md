@@ -225,6 +225,11 @@ Only users in `AUTHORIZED_USER_IDS` can execute commands.
 Server and admin passwords are **never asked via Discord** — they live in
 `.env_setup` (`SERVER_PASSWORD`, `ADMIN_PASSWORD`), queried by the installer.
 
+BattlEye is on by default. To run without it, add `BATTLEYE=0` to `.env_setup`
+and restart the A3Bot service; every later `/setup_apply` then writes
+`BattlEye = 0;`. It takes effect on the next `/setup_apply` — to switch the
+running server now, edit `BattlEye` in `server.cfg` and `/restart`.
+
 Exporting a preset from the Arma 3 launcher: **MODS tab → PRESET (top right) →
 SHARE → Export to file**.
 

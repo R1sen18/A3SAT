@@ -73,6 +73,13 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 # would hand #login admin rights to anyone who can read this repo.
 PLACEHOLDER_ADMIN_PASSWORDS = {"changeme", "change_me", "password", "admin",
                                "your_admin_password_here"}
+# BATTLEYE=1 (default) enables BattlEye in the server.cfg written by
+# /setup_apply; BATTLEYE=0 disables it. Anything else is a config error rather
+# than a silent guess about anti-cheat.
+_battleye_raw = (os.getenv("BATTLEYE") or "1").strip()
+if _battleye_raw not in ("0", "1"):
+    raise _config_error(f"BATTLEYE must be 0 or 1, got {_battleye_raw!r}.")
+BATTLEYE = int(_battleye_raw)
 
 # Project root = two levels up from this file (…\A3SAT2\scripts\python\A3Setup.py)
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -111,7 +118,7 @@ passwordAdmin = "{passwordAdmin}";
 maxPlayers = {maxPlayers};
 persistent = 1;
 timeStampFormat = "short";
-BattlEye = 1;
+BattlEye = {battleye};
 
 motd[] = {{"Welcome"}};
 motdInterval = 9999;
@@ -1643,6 +1650,7 @@ async def setup_apply(interaction: discord.Interaction, restart: bool = False):
         passwordAdmin=admin_pw,
         maxPlayers=cfg["maxPlayers"],
         template=cfg["template"],
+        battleye=BATTLEYE,
     )
     await asyncio.to_thread(write_text_atomic, SERVER_CFG_PATH, server_cfg)
 
