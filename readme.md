@@ -234,9 +234,11 @@ SHARE → Export to file**.
 A static web page that builds a launcher preset `.html` for you:
 https://r1sen18.github.io/A3SAT/modlist/
 
-Paste Steam Workshop links, IDs or a collection; it looks up the mods and their
-required items, lets you tick what to include, and exports a preset you can
-attach to `/setup`. Mods you remove stay removed — they are not re-added when
+Paste Workshop links, collection links or IDs (one per line) and press **Add**;
+it looks up the mods and their required items. Review the list, press **Remove**
+on any mod you don't want, then **Download preset** (a launcher `.html` you can
+attach to `/setup`) or **Copy share link**. **Import preset...** loads an existing
+preset into the list. Mods you remove stay removed — they are not re-added when
 you add more links later.
 
 One-time setup (owner):
