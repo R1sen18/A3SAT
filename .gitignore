@@ -23,3 +23,7 @@ logs/
 # Windows
 Thumbs.db
 Desktop.ini
+
+# Cloudflare Worker local secrets / build dir
+.dev.vars
+.wrangler/

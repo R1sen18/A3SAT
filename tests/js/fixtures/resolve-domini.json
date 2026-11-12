@@ -1,0 +1,144 @@
+{
+  "roots": [
+    "3806463703"
+  ],
+  "truncated": false,
+  "items": {
+    "450814997": {
+      "id": "450814997",
+      "title": "CBA_A3",
+      "size": 4000000,
+      "updated": 1786300000,
+      "requires": [],
+      "available": true,
+      "appId": 107410,
+      "isCollection": false,
+      "contains": []
+    },
+    "2817145194": {
+      "id": "2817145194",
+      "title": "Libertad - SA - Core",
+      "size": 290000000,
+      "updated": 1694000000,
+      "requires": [
+        "450814997"
+      ],
+      "available": true,
+      "appId": 107410,
+      "isCollection": false,
+      "contains": []
+    },
+    "2817149713": {
+      "id": "2817149713",
+      "title": "Libertad - SA - Horse",
+      "size": 410000000,
+      "updated": 1793900000,
+      "requires": [
+        "2817145194"
+      ],
+      "available": true,
+      "appId": 107410,
+      "isCollection": false,
+      "contains": []
+    },
+    "3020755032": {
+      "id": "3020755032",
+      "title": "Antistasi Ultimate - Mod",
+      "size": 402900000,
+      "updated": 1794340800,
+      "requires": [
+        "450814997"
+      ],
+      "available": true,
+      "appId": 107410,
+      "isCollection": false,
+      "contains": []
+    },
+    "3510959070": {
+      "id": "3510959070",
+      "title": "IMS: DEV",
+      "size": 170000000,
+      "updated": 1787600000,
+      "requires": [
+        "450814997"
+      ],
+      "available": true,
+      "appId": 107410,
+      "isCollection": false,
+      "contains": []
+    },
+    "3779310113": {
+      "id": "3779310113",
+      "title": "Arma Domini - 1400AD",
+      "size": 2215768964,
+      "updated": 1793303890,
+      "requires": [
+        "450814997",
+        "3510959070"
+      ],
+      "available": true,
+      "appId": 107410,
+      "isCollection": false,
+      "contains": []
+    },
+    "3780409647": {
+      "id": "3780409647",
+      "title": "Arma Domini - The Black Dogs of Burnham",
+      "size": 40000000,
+      "updated": 1793303890,
+      "requires": [
+        "3779310113",
+        "3510959070"
+      ],
+      "available": true,
+      "appId": 107410,
+      "isCollection": false,
+      "contains": []
+    },
+    "3794701829": {
+      "id": "3794701829",
+      "title": "Renaissance Of Warfare",
+      "size": 120000000,
+      "updated": 1788300000,
+      "requires": [
+        "450814997"
+      ],
+      "available": true,
+      "appId": 107410,
+      "isCollection": false,
+      "contains": []
+    },
+    "3806463703": {
+      "id": "3806463703",
+      "title": "Domini Antistasi",
+      "size": 83800000,
+      "updated": 1794421967,
+      "requires": [
+        "450814997",
+        "3510959070",
+        "3020755032",
+        "3779310113",
+        "2817145194",
+        "2817149713",
+        "3780409647",
+        "3816263034",
+        "3794701829"
+      ],
+      "available": true,
+      "appId": 107410,
+      "isCollection": false,
+      "contains": []
+    },
+    "3816263034": {
+      "id": "3816263034",
+      "title": "gabes1410 AD – Arma Domini Factions",
+      "size": 1000000,
+      "updated": 1791500000,
+      "requires": [],
+      "available": true,
+      "appId": 107410,
+      "isCollection": false,
+      "contains": []
+    }
+  }
+}

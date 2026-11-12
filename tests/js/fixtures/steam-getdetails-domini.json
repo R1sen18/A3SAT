@@ -1,0 +1,236 @@
+{
+ "response": {
+  "result": 1,
+  "resultcount": 10,
+  "publishedfiledetails": [
+   {
+    "publishedfileid": "450814997",
+    "result": 1,
+    "creator": "0",
+    "consumer_appid": 107410,
+    "title": "CBA_A3",
+    "file_size": "4000000",
+    "time_updated": 1786300000,
+    "visibility": 0,
+    "banned": 0,
+    "file_type": 0,
+    "children": []
+   },
+   {
+    "publishedfileid": "2817145194",
+    "result": 1,
+    "creator": "0",
+    "consumer_appid": 107410,
+    "title": "Libertad - SA - Core",
+    "file_size": "290000000",
+    "time_updated": 1694000000,
+    "visibility": 0,
+    "banned": 0,
+    "file_type": 0,
+    "children": [
+     {
+      "publishedfileid": "450814997",
+      "sortorder": 1,
+      "file_type": 0
+     }
+    ]
+   },
+   {
+    "publishedfileid": "2817149713",
+    "result": 1,
+    "creator": "0",
+    "consumer_appid": 107410,
+    "title": "Libertad - SA - Horse",
+    "file_size": "410000000",
+    "time_updated": 1793900000,
+    "visibility": 0,
+    "banned": 0,
+    "file_type": 0,
+    "children": [
+     {
+      "publishedfileid": "2817145194",
+      "sortorder": 1,
+      "file_type": 0
+     }
+    ]
+   },
+   {
+    "publishedfileid": "3020755032",
+    "result": 1,
+    "creator": "0",
+    "consumer_appid": 107410,
+    "title": "Antistasi Ultimate - Mod",
+    "file_size": "402900000",
+    "time_updated": 1794340800,
+    "visibility": 0,
+    "banned": 0,
+    "file_type": 0,
+    "children": [
+     {
+      "publishedfileid": "450814997",
+      "sortorder": 1,
+      "file_type": 0
+     }
+    ]
+   },
+   {
+    "publishedfileid": "3510959070",
+    "result": 1,
+    "creator": "0",
+    "consumer_appid": 107410,
+    "title": "IMS: DEV",
+    "file_size": "170000000",
+    "time_updated": 1787600000,
+    "visibility": 0,
+    "banned": 0,
+    "file_type": 0,
+    "children": [
+     {
+      "publishedfileid": "450814997",
+      "sortorder": 1,
+      "file_type": 0
+     }
+    ]
+   },
+   {
+    "publishedfileid": "3779310113",
+    "result": 1,
+    "creator": "0",
+    "consumer_appid": 107410,
+    "title": "Arma Domini - 1400AD",
+    "file_size": "2215768964",
+    "time_updated": 1793303890,
+    "visibility": 0,
+    "banned": 0,
+    "file_type": 0,
+    "children": [
+     {
+      "publishedfileid": "450814997",
+      "sortorder": 1,
+      "file_type": 0
+     },
+     {
+      "publishedfileid": "3510959070",
+      "sortorder": 2,
+      "file_type": 0
+     }
+    ]
+   },
+   {
+    "publishedfileid": "3780409647",
+    "result": 1,
+    "creator": "0",
+    "consumer_appid": 107410,
+    "title": "Arma Domini - The Black Dogs of Burnham",
+    "file_size": "40000000",
+    "time_updated": 1793303890,
+    "visibility": 0,
+    "banned": 0,
+    "file_type": 0,
+    "children": [
+     {
+      "publishedfileid": "3779310113",
+      "sortorder": 1,
+      "file_type": 0
+     },
+     {
+      "publishedfileid": "3510959070",
+      "sortorder": 2,
+      "file_type": 0
+     }
+    ]
+   },
+   {
+    "publishedfileid": "3794701829",
+    "result": 1,
+    "creator": "0",
+    "consumer_appid": 107410,
+    "title": "Renaissance Of Warfare",
+    "file_size": "120000000",
+    "time_updated": 1788300000,
+    "visibility": 0,
+    "banned": 0,
+    "file_type": 0,
+    "children": [
+     {
+      "publishedfileid": "450814997",
+      "sortorder": 1,
+      "file_type": 0
+     }
+    ]
+   },
+   {
+    "publishedfileid": "3806463703",
+    "result": 1,
+    "creator": "0",
+    "consumer_appid": 107410,
+    "title": "Domini Antistasi",
+    "file_size": "83800000",
+    "time_updated": 1794421967,
+    "visibility": 0,
+    "banned": 0,
+    "file_type": 0,
+    "children": [
+     {
+      "publishedfileid": "450814997",
+      "sortorder": 1,
+      "file_type": 0
+     },
+     {
+      "publishedfileid": "3510959070",
+      "sortorder": 2,
+      "file_type": 0
+     },
+     {
+      "publishedfileid": "3020755032",
+      "sortorder": 3,
+      "file_type": 0
+     },
+     {
+      "publishedfileid": "3779310113",
+      "sortorder": 4,
+      "file_type": 0
+     },
+     {
+      "publishedfileid": "2817145194",
+      "sortorder": 5,
+      "file_type": 0
+     },
+     {
+      "publishedfileid": "2817149713",
+      "sortorder": 6,
+      "file_type": 0
+     },
+     {
+      "publishedfileid": "3780409647",
+      "sortorder": 7,
+      "file_type": 0
+     },
+     {
+      "publishedfileid": "3816263034",
+      "sortorder": 8,
+      "file_type": 0
+     },
+     {
+      "publishedfileid": "3794701829",
+      "sortorder": 9,
+      "file_type": 0
+     }
+    ]
+   },
+   {
+    "publishedfileid": "3816263034",
+    "result": 1,
+    "creator": "0",
+    "consumer_appid": 107410,
+    "title": "gabes1410 AD – Arma Domini Factions",
+    "file_size": "1000000",
+    "time_updated": 1791500000,
+    "visibility": 0,
+    "banned": 0,
+    "file_type": 0,
+    "children": []
+   }
+  ]
+ }
+}
