@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arma 3 Modlist Creator</title>
+<style>
+:root {
+  --bg: #f6f7f9; --card: #ffffff; --text: #1d2330; --muted: #5d6677; --border: #d9dde5;
+  --accent: #2456c9; --accent-text: #ffffff; --warn-bg: #fff4d6; --warn-text: #6b4b00;
+  --err-bg: #fde4e4; --err-text: #8a1c1c; --badge-bg: #e8eefc; --badge-text: #1c3f94;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171d; --card: #1d222b; --text: #e6e9ef; --muted: #98a1b3; --border: #343b49;
+    --accent: #6c97f5; --accent-text: #0d1118; --warn-bg: #3a3012; --warn-text: #f2d98a;
+    --err-bg: #43191b; --err-text: #f5b4b4; --badge-bg: #25304d; --badge-text: #aac4ff;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 760px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 1.4rem; margin: 0 0 4px; }
+h2 { font-size: 1.05rem; margin: 0 0 8px; }
+.sub { color: var(--muted); margin: 0 0 16px; }
+section { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 14px; }
+textarea, input[type=text] { width: 100%; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
+textarea { min-height: 90px; resize: vertical; }
+button, .filebtn { font: inherit; cursor: pointer; border-radius: 6px; border: 1px solid var(--border); background: var(--card); color: var(--text); padding: 6px 12px; }
+button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+.note { font-size: .9rem; color: var(--muted); margin-top: 6px; overflow-wrap: anywhere; }
+.msg { border-radius: 6px; padding: 8px 10px; margin-top: 8px; font-size: .92rem; overflow-wrap: anywhere; }
+.msg.err { background: var(--err-bg); color: var(--err-text); }
+.msg.warn { background: var(--warn-bg); color: var(--warn-text); }
+.msg:empty { display: none; }
+ul { list-style: none; margin: 0; padding: 0; }
+li.mod { border-top: 1px solid var(--border); padding: 10px 0; }
+li.mod:first-child { border-top: 0; }
+.title { font-weight: 600; overflow-wrap: anywhere; }
+.title a { color: var(--accent); }
+.meta { color: var(--muted); font-size: .88rem; }
+.badge { display: inline-block; font-size: .8rem; background: var(--badge-bg); color: var(--badge-text); border-radius: 10px; padding: 1px 8px; margin: 4px 4px 0 0; overflow-wrap: anywhere; }
+.badge.warn { background: var(--warn-bg); color: var(--warn-text); }
+.line { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+.totals { font-weight: 600; margin-bottom: 4px; }
+input[type=file] { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Arma 3 Modlist Creator</h1>
+  <p class="sub">Paste Workshop links or IDs, review the list, and download a launcher preset.</p>
+
+  <section>
+    <h2>Add mods</h2>
+    <textarea id="input" placeholder="Workshop URLs, collection URLs or IDs, one per line" aria-label="Workshop links or IDs"></textarea>
+    <div class="row"><button id="add" class="primary">Add</button>
+      <label class="filebtn" for="import">Import preset...</label><input type="file" id="import" accept=".html,text/html"></div>
+    <div id="ignored" class="msg warn"></div>
+    <div id="error" class="msg err" role="alert"></div>
+    <div id="trunc" class="msg warn"></div>
+  </section>
+
+  <section>
+    <h2>Your list</h2>
+    <div id="totals" class="totals"></div>
+    <ul id="list"></ul>
+    <div id="empty" class="note">No mods yet.</div>
+  </section>
+
+  <section>
+    <h2>Export</h2>
+    <label for="name">Preset name</label>
+    <input type="text" id="name" value="Server Mods">
+    <div class="row"><button id="export" class="primary">Download preset</button>
+      <button id="copy">Copy share link</button></div>
+    <div id="reason" class="msg warn"></div>
+    <div id="excluded" class="note"></div>
+  </section>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>
