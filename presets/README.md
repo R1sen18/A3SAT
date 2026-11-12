@@ -24,7 +24,7 @@ Notes from a real setup:
   selection, one more `/restart` fixed it.
 - Domini needs the Antistasi Ultimate version it targets (12.4.1 at time of writing; the RPT's
   `[DOMINI] Target AU` line shows it). An older `@AntistasiUltimateMod` left from a previous setup
-  makes the patch fail (`[DOMINI] INCOMPATIBLE AU SOURCE`) and no role can be picked. Fix: stop the
-  server **and** the headless client (it locks the files), then
-  `robocopy "<WORKSHOP_BASE>\3020755032" "<SERVER_BASE>\@AntistasiUltimateMod" /MIR /R:2 /W:5`,
-  copy its `.bikey` files into `keys\`, start again. Good: `Patch failures: []` in the RPT.
+  makes the patch fail (`[DOMINI] INCOMPATIBLE AU SOURCE`) and no role can be picked. `/download`
+  then `/setup_apply` replace it with the newer copy (the server and headless client are stopped
+  first); if it is listed under "Kept as installed", run `/download` again first. Good:
+  `Patch failures: []` in the RPT.

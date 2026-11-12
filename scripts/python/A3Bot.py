@@ -12,6 +12,7 @@ import a2s
 from terrain import world_available
 from datetime import datetime
 from dotenv import load_dotenv
+import modstate
 
 # A3Bot — the one bot for the Arma 3 server: service management (start/stop/
 # restart/status/uptime/players), setup wizard, and backup/restore profiles.
@@ -471,28 +472,88 @@ def restore_profile(folder_name: str) -> tuple[bool, str]:
     return True, ", ".join(changes)
 
 
-def install_mods_from_workshop(mods: dict[str, str]) -> tuple[list[str], list[str], dict[str, str]]:
-    """Copy downloaded workshop mods into the server folder.
-    Returns (installed, missing, id_to_folder)."""
-    installed, missing = [], []
+def cache_versions() -> dict[str, int]:
+    """{mod_id: timeupdated} of the copies in the SteamCMD workshop cache."""
+    return modstate.read_cache_versions(modstate.acf_path_for(WORKSHOP_BASE))
+
+
+def steam_versions(mod_ids: list[str]) -> dict[str, int]:
+    """{mod_id: time_updated} of Steam's current versions; {} when the API is
+    unreachable — callers then simply can't prove a legacy folder outdated."""
+    if not mod_ids:
+        return {}
+    try:
+        details = fetch_mod_details(list(mod_ids))
+    except Exception as e:
+        print(f"[mods] Steam details unavailable: {e}", flush=True)
+        return {}
+    return {mid: d["time_updated"] for mid, d in details.items() if d["time_updated"]}
+
+
+def plan_mod_refresh(mods: dict[str, str]) -> list[str]:
+    """Folders a /setup_apply of ``mods`` would replace by a newer workshop copy
+    — the server and HC must be stopped before that happens."""
     id_to_folder = build_folder_map(mods)
+    installed = load_installed_versions()
+    cache = cache_versions()
+    steam = steam_versions(list(mods))
+    out = []
+    for mid, folder in id_to_folder.items():
+        dest = os.path.join(SERVER_BASE, folder)
+        if not os.path.isdir(dest) or not workshop_ready(mid):
+            continue
+        decision = modstate.decide_refresh(
+            mid, modstate.installed_version(installed, mid, folder), cache.get(mid),
+            steam.get(mid), folder_id=modstate.read_published_id(dest),
+            cache_id=modstate.read_published_id(os.path.join(WORKSHOP_BASE, mid)))
+        if decision.replace:
+            out.append(folder)
+    return out
+
+
+def install_mods_from_workshop(mods: dict[str, str]) -> dict:
+    """Copy downloaded workshop mods into the server folder.
+
+    Missing folders are copied; an existing folder is replaced only by a newer
+    copy of the same mod (see modstate.decide_refresh), via a rename-swap that
+    keeps the old copy if anything fails. Returns a dict with
+    installed / missing / refreshed (folder names), notes (folders kept
+    although they may be stale, with the reason), id_to_folder, and
+    versions ({id: time_updated} of every folder copied now)."""
+    installed, missing, refreshed, notes = [], [], [], []
+    versions: dict[str, int] = {}
+    id_to_folder = build_folder_map(mods)
+    previous = load_installed_versions()
+    cache = cache_versions()
+    steam = steam_versions(list(mods))
     os.makedirs(KEYS_DIR, exist_ok=True)
     for mod_id, folder_name in id_to_folder.items():
         src = os.path.join(WORKSHOP_BASE, mod_id)
         dest = os.path.join(SERVER_BASE, folder_name)
         if os.path.isdir(dest):
-            installed.append(folder_name)  # already present — never delete/overwrite
+            installed.append(folder_name)
+            if not workshop_ready(mod_id):
+                continue  # nothing to refresh from
+            result = modstate.refresh_folder(
+                mod_id, src, dest,
+                modstate.installed_version(previous, mod_id, folder_name),
+                cache.get(mod_id), steam.get(mod_id), keys_dir=KEYS_DIR)
+            if result.replaced:
+                refreshed.append(folder_name)
+                versions[mod_id] = cache[mod_id]
+            elif result.note:
+                notes.append(f"{folder_name}: {result.note}")
             continue
         if not workshop_ready(mod_id):
             missing.append(f"{folder_name} ({mod_id})")
             continue
         shutil.copytree(src, dest)
         installed.append(folder_name)
-        for root, _, files in os.walk(dest):
-            for f in files:
-                if f.lower().endswith(".bikey"):
-                    shutil.copy2(os.path.join(root, f), KEYS_DIR)
-    return installed, missing, id_to_folder
+        if mod_id in cache:
+            versions[mod_id] = cache[mod_id]
+        modstate.copy_keys(dest, KEYS_DIR)
+    return {"installed": installed, "missing": missing, "refreshed": refreshed,
+            "notes": notes, "id_to_folder": id_to_folder, "versions": versions}
 
 
 _mod_details_cache: dict = {"key": None, "at": 0.0, "data": {}}
@@ -611,10 +672,17 @@ def fmt_gb(n: int) -> str:
 LAST_SETUP_FILE = os.path.join(PROJECT_ROOT, "last_setup.json")
 
 
-def save_last_setup(id_to_folder: dict[str, str], names: dict[str, str] | None = None):
+def save_last_setup(id_to_folder: dict[str, str], names: dict[str, str] | None = None,
+                    versions: dict[str, int] | None = None):
+    """Record the applied setup. ``versions`` ({id: time_updated}) are the
+    folders just copied; every other mod keeps its recorded installed version
+    as long as it still maps to the same folder."""
     payload = {"applied_at": int(datetime.now().timestamp()), "mods": id_to_folder}
     # Display names let us regenerate a launcher preset later (/preset)
     payload["names"] = names if names is not None else load_last_names()
+    # Per-mod installed version: what /update and /setup_apply compare against
+    payload["installed"] = modstate.merge_installed(
+        load_installed_versions(), id_to_folder, versions)
     # Written atomically: this file is saved right before a restart, and a
     # half-written one used to break every command that reads it.
     write_text_atomic(LAST_SETUP_FILE, json.dumps(payload, indent=2))
@@ -696,42 +764,57 @@ def build_preset_html(preset_name: str = "Server Mods") -> tuple[str, int]:
 
 def load_last_setup() -> dict[str, str]:
     """Returns {mod_id: folder} of the last applied setup."""
-    data = _read_last_setup()
     # Backward compat: old format was a flat {id: folder} dict
-    mods = data.get("mods", data)
-    return mods if isinstance(mods, dict) else {}
+    return modstate.parse_state(_read_last_setup())["mods"]
 
 
-def load_applied_at() -> int:
-    """Unix timestamp of the last /setup_apply or /update (0 if unknown)."""
-    try:
-        return int(_read_last_setup().get("applied_at", 0))
-    except (TypeError, ValueError):
-        return 0
+def load_installed_versions() -> dict[str, dict]:
+    """{mod_id: {"folder", "time_updated"}} — the Steam version of the copy
+    installed in each folder. Empty for setups applied before this was
+    recorded; such folders count as "version unknown"."""
+    return modstate.parse_state(_read_last_setup())["installed"]
 
 
 def find_outdated_mods() -> list[tuple[str, str, str]]:
-    """Compare Steam's time_updated against the last apply time.
-    Returns [(mod_id, folder, title), ...] for mods updated since then."""
+    """Compare Steam's time_updated against each mod's installed version.
+    Returns [(mod_id, folder, title), ...] for mods Steam has newer versions of.
+
+    Per mod, not against the last apply time: re-applying a setup does not
+    refresh a folder that was already present, so "applied today" says nothing
+    about the copy on disk. Folders with no recorded version (legacy state)
+    are reported as outdated — /update then replaces them with Steam's current
+    version, which records it."""
     mods = load_last_setup()
-    applied_at = load_applied_at()
-    if not mods or not applied_at:
+    if not mods:
         return []
+    installed = load_installed_versions()
     details = fetch_mod_details(list(mods.keys()))
     outdated = []
     for mid, folder in mods.items():
         d = details.get(mid)
-        if d and d["time_updated"] > applied_at:
+        if d and modstate.is_outdated(modstate.installed_version(installed, mid, folder),
+                                      d["time_updated"] or None):
             outdated.append((mid, folder, d["title"] or folder))
     return outdated
 
 
+def stale_cache_ids(mod_ids: list[str]) -> list[str]:
+    """Mods whose workshop-cache copy is older than Steam's current version:
+    SteamCMD has to fetch them although their cache folder exists."""
+    return modstate.stale_cache_ids(mod_ids, steam_versions(mod_ids), cache_versions())
+
+
 def update_installed_mods(outdated_ids: list[str]) -> tuple[list[str], list[str], list[str]]:
     """Re-copy updated mods from the workshop cache over their server @Folders.
-    Only replaces a folder with a newer copy of the same mod.
+    Only replaces a folder with a newer copy of the same mod; the server and
+    headless client must be stopped (they hold the files open).
     Returns (updated, needs_download, failed)."""
     mods = load_last_setup()
+    installed = load_installed_versions()
+    cache = cache_versions()
+    steam = steam_versions(outdated_ids)
     updated, needs_download, failed = [], [], []
+    versions: dict[str, int] = {}
     for mid in outdated_ids:
         folder = mods.get(mid)
         if not folder:
@@ -741,37 +824,31 @@ def update_installed_mods(outdated_ids: list[str]) -> tuple[list[str], list[str]
         if not workshop_ready(mid):
             needs_download.append(f"{folder} ({mid})")
             continue
-        # Move the old copy aside instead of deleting it in place: if the server
-        # is still holding a .pbo open, the move fails before anything is lost,
-        # where an in-place rmtree would leave a half-deleted mod the server
-        # can no longer load.
-        stale = f"{dest}.old"
-        try:
-            if os.path.isdir(stale):
-                shutil.rmtree(stale, ignore_errors=True)
-            if os.path.isdir(dest):
-                os.rename(dest, stale)
-        except OSError as e:
-            failed.append(f"{folder} ({e.__class__.__name__}: in use by the running server?)")
-            continue
-        try:
-            shutil.copytree(src, dest)
-        except OSError as e:
-            # Put the working copy back rather than leaving the mod missing
-            if os.path.isdir(stale) and not os.path.isdir(dest):
-                os.rename(stale, dest)
-            failed.append(f"{folder} ({e.__class__.__name__})")
-            continue
-        shutil.rmtree(stale, ignore_errors=True)
-        for root, _, files in os.walk(dest):
-            for f in files:
-                if f.lower().endswith(".bikey"):
-                    shutil.copy2(os.path.join(root, f), KEYS_DIR)
+        if not os.path.isdir(dest):
+            try:
+                shutil.copytree(src, dest)
+            except OSError as e:
+                failed.append(f"{folder} ({e.__class__.__name__})")
+                continue
+            modstate.copy_keys(dest, KEYS_DIR)
+        else:
+            result = modstate.refresh_folder(
+                mid, src, dest, modstate.installed_version(installed, mid, folder),
+                cache.get(mid), steam.get(mid), keys_dir=KEYS_DIR)
+            if not result.replaced:
+                if result.kind in (modstate.FAILED, modstate.MISMATCH):
+                    failed.append(f"{folder} ({result.note})")
+                else:
+                    # The cache copy is not provably newer than the installed
+                    # one — the download did not fetch the update (yet).
+                    needs_download.append(f"{folder} ({mid}) — workshop copy is not newer")
+                continue
+        if mid in cache:
+            versions[mid] = cache[mid]
         updated.append(folder)
-    # Only refresh applied_at when nothing was skipped — otherwise skipped mods
-    # would be considered up to date and never flagged again.
-    if updated and not needs_download and not failed:
-        save_last_setup(mods)
+    # Per-mod versions: skipped mods keep their old record and stay flagged.
+    if updated:
+        save_last_setup(mods, versions=versions)
     return updated, needs_download, failed
 
 
@@ -814,22 +891,30 @@ def missing_from_workshop(mod_ids: list[str]) -> list[str]:
 
 
 async def run_steamcmd_download(mod_ids: list[str], followup: discord.Webhook,
-                                max_attempts: int = 5) -> list[str]:
+                                max_attempts: int = 5,
+                                refresh_ids: list[str] | None = None) -> list[str]:
     """Run SteamCMD to download the given workshop items, retrying because big
     mods routinely time out. Returns the list of ids still missing afterwards.
-    Requires STEAM_USERNAME with a cached login on this machine."""
+    ``refresh_ids`` are items already in the cache in an outdated version:
+    they force at least one SteamCMD run (which updates them) even when
+    nothing is missing. Requires STEAM_USERNAME with a cached login."""
     script_path = os.path.join(PROJECT_ROOT, "download_mods.txt")
     with open(script_path, "w") as f:
         f.write(generate_steamcmd_script(mod_ids))
 
     remaining = missing_from_workshop(mod_ids)
+    refresh = [mid for mid in (refresh_ids or []) if mid in mod_ids and mid not in remaining]
     for attempt in range(1, max_attempts + 1):
-        if not remaining:
+        # Stale items only force the first run: if SteamCMD's version record
+        # doesn't advance, the install step reports it instead of retrying.
+        if not remaining and not (attempt == 1 and refresh):
             break
         started = datetime.now()
+        todo = f"{len(remaining)} mods to download"
+        if attempt == 1 and refresh:
+            todo += f", {len(refresh)} to update"
         await followup.send(
-            f"⬇️ SteamCMD attempt {attempt}/{max_attempts} — "
-            f"{len(remaining)} mods to download...")
+            f"⬇️ SteamCMD attempt {attempt}/{max_attempts} — {todo}...")
         proc = await asyncio.create_subprocess_exec(
             STEAMCMD, "+runscript", script_path,
             stdout=asyncio.subprocess.PIPE,
@@ -962,6 +1047,19 @@ async def a_query_server(timeout: float = 3.0):
     return await asyncio.to_thread(a2s.info, (QUERY_HOST, QUERY_PORT), timeout)
 
 
+_hc_restart_task: asyncio.Task | None = None
+
+
+def schedule_hc_restart(delay: int = 90):
+    """(Re)start the headless client ``delay`` seconds after the server. Kept
+    as a handle so a stop in the meantime can cancel it — otherwise the HC
+    would come back up in the middle of a mod-folder replacement."""
+    global _hc_restart_task
+    if _hc_restart_task and not _hc_restart_task.done():
+        _hc_restart_task.cancel()
+    _hc_restart_task = asyncio.create_task(restart_headless_client(delay=delay))
+
+
 async def restart_headless_client(delay: int = 90):
     await asyncio.sleep(delay)
     try:
@@ -985,14 +1083,34 @@ async def wait_until_joinable(followup: discord.Webhook, timeout: int = 300):
     await followup.send("⚠️ Server did not become joinable within 5 minutes.")
 
 
+def service_active(state: str) -> bool:
+    """Whether ``sc query`` output shows a service that is not fully stopped
+    (running, starting, stopping or paused). An empty result — service not
+    installed, e.g. no HC — counts as stopped."""
+    return bool(state) and "STOPPED" not in state
+
+
+async def services_running() -> list[str]:
+    """The server/HC services that are not fully stopped."""
+    return [s for s in (SERVICE_NAME, HC_SERVICE_NAME)
+            if service_active(await a_service_state(s))]
+
+
 async def stop_server_and_wait(timeout: int = 120) -> bool:
-    """Stop the server service and wait until it has fully exited."""
-    if "RUNNING" not in await a_service_state(SERVICE_NAME):
+    """Stop the server AND the headless client and wait until both have fully
+    exited. The HC loads the same mod folders as the server, so a running HC
+    alone is enough to make replacing a mod folder fail (error 32 on
+    meta.cpp/.pbo files)."""
+    if _hc_restart_task and not _hc_restart_task.done():
+        _hc_restart_task.cancel()  # don't let a pending HC restart race the stop
+    active = await services_running()
+    if not active:
         return True
-    await a_sc("stop", SERVICE_NAME)
+    for service in active:
+        await a_sc("stop", service)
     for _ in range(timeout // 5):
         await asyncio.sleep(5)
-        if "STOPPED" in await a_service_state(SERVICE_NAME):
+        if not await services_running():
             return True
     return False
 
@@ -1003,7 +1121,7 @@ async def start_server(followup: discord.Webhook, verb: str = "started"):
         await a_sc("start", SERVICE_NAME, check=True)
         await followup.send(f"🟡 Service '{SERVICE_NAME}' {verb} — waiting for server to become joinable...")
         asyncio.create_task(wait_until_joinable(followup))
-        asyncio.create_task(restart_headless_client(delay=90))
+        schedule_hc_restart(delay=90)
     except Exception as e:
         await followup.send(f"Failed to start service: {e}")
 
@@ -1016,9 +1134,9 @@ async def do_restart(followup: discord.Webhook) -> bool:
     with a "restarted" message."""
     if not await stop_server_and_wait():
         await followup.send(
-            f"⚠️ Service '{SERVICE_NAME}' did not stop within 2 minutes — **not** starting it "
-            f"again, since that would fail on the still-bound port. Check the service, then "
-            f"use `/start`.")
+            f"⚠️ '{SERVICE_NAME}' / '{HC_SERVICE_NAME}' did not stop within 2 minutes — "
+            f"**not** starting the server again, since that would fail on the still-bound "
+            f"port. Check the services, then use `/start`.")
         return False
     await start_server(followup, verb="restarted")
     return True
@@ -1119,26 +1237,34 @@ async def start(interaction: discord.Interaction):
         await a_sc("start", SERVICE_NAME, check=True)
         await interaction.followup.send(f"🟡 Service '{SERVICE_NAME}' started — waiting for server to become joinable...")
         asyncio.create_task(wait_until_joinable(interaction.followup))
-        asyncio.create_task(restart_headless_client(delay=90))
+        schedule_hc_restart(delay=90)
     except Exception as e:
         await interaction.followup.send(f"Failed to start service: {e}")
 
 
-@client.tree.command(name="stop", description="Stops the Arma 3 server service")
+@client.tree.command(name="stop", description="Stops the Arma 3 server and its headless client")
 async def stop(interaction: discord.Interaction):
     if not is_authorized(interaction):
         await interaction.response.send_message("You are not authorized to execute this command.", ephemeral=True)
         return
     await interaction.response.defer()
-    state = await a_service_state(SERVICE_NAME)
-    if "STOPPED" in state or "STOP_PENDING" in state or "not running" in state.lower():
-        await interaction.followup.send(f"Service '{SERVICE_NAME}' is already stopped!")
+    # The HC is stopped too: left running it keeps the mod folders locked and
+    # keeps trying to reconnect to a server that is gone.
+    active = await services_running()
+    if not active:
+        await interaction.followup.send(
+            f"Services '{SERVICE_NAME}' and '{HC_SERVICE_NAME}' are already stopped!")
         return
     try:
-        await a_sc("stop", SERVICE_NAME, check=True)
-        await interaction.followup.send(f"Service '{SERVICE_NAME}' stopped successfully!")
+        if await stop_server_and_wait():
+            await interaction.followup.send(
+                f"Stopped: {', '.join(f'`{s}`' for s in active)}.")
+        else:
+            still = await services_running()
+            await interaction.followup.send(
+                f"⚠️ Still not stopped after 2 minutes: {', '.join(f'`{s}`' for s in still)}.")
     except Exception as e:
-        await interaction.followup.send(f"Failed to stop service: {e}")
+        await interaction.followup.send(f"Failed to stop services: {e}")
 
 
 @client.tree.command(name="restart", description="Restarts the Arma 3 server service")
@@ -1402,7 +1528,11 @@ async def download(interaction: discord.Interaction):
         return
 
     await interaction.response.defer()
-    remaining = await run_steamcmd_download(mod_ids, interaction.followup)
+    # Cached copies older than Steam's version must be fetched again, or
+    # /setup_apply would install (or keep) the old version.
+    stale = await asyncio.to_thread(stale_cache_ids, mod_ids)
+    remaining = await run_steamcmd_download(mod_ids, interaction.followup,
+                                            refresh_ids=stale)
     if remaining:
         await interaction.followup.send(
             f"⚠️ **{len(remaining)} mods still missing** after all attempts "
@@ -1629,20 +1759,42 @@ async def setup_apply(interaction: discord.Interaction, restart: bool = False):
             "Use a password of letters, digits and simple punctuation in `.env_setup`.")
         return
 
-    # 3. Always back up the current state before changing anything
+    # 3. Folders that already exist but are older than the downloaded copy get
+    #    replaced. The server AND the headless client hold those files open, so
+    #    both are stopped first — still before anything is changed.
+    stopped_for_refresh = False
+    if cfg["mods"]:
+        to_refresh = await asyncio.to_thread(plan_mod_refresh, cfg["mods"])
+        if to_refresh and await services_running():
+            await interaction.followup.send(
+                f"⏹️ {len(to_refresh)} installed mods have a newer downloaded copy "
+                f"({', '.join(f'`{f}`' for f in to_refresh[:5])}"
+                f"{', …' if len(to_refresh) > 5 else ''}) — stopping the server and "
+                f"headless client to replace them...")
+            if not await stop_server_and_wait():
+                await interaction.followup.send(
+                    "⚠️ Server/headless client did not stop within 2 minutes — "
+                    "**nothing was changed**. Stop them with `/stop` and run "
+                    "`/setup_apply` again.")
+                return
+            stopped_for_refresh = True
+
+    # 4. Always back up the current state before changing anything
     backup_folder = await asyncio.to_thread(make_backup, "auto_pre_setup")
 
-    # 4. Install mods (copy from workshop dir; never deletes existing folders)
-    installed, missing, id_to_folder = [], [], {}
+    # 5. Install mods: copy missing ones, replace outdated ones with the newer
+    #    downloaded copy of the same mod (never with an older or foreign one)
+    install = {"installed": [], "missing": [], "refreshed": [], "notes": [],
+               "id_to_folder": {}, "versions": {}}
     if cfg["mods"]:
         await interaction.followup.send(
             f"⏳ Backup done (`{os.path.basename(backup_folder)}`). "
             f"Copying up to {len(cfg['mods'])} mods to the server folder — "
             f"this can take several minutes for large mod sets...")
-        installed, missing, id_to_folder = await asyncio.to_thread(
-            install_mods_from_workshop, cfg["mods"])
+        install = await asyncio.to_thread(install_mods_from_workshop, cfg["mods"])
+    installed, id_to_folder = install["installed"], install["id_to_folder"]
 
-    # 5. Write server.cfg (atomic + UTF-8: a server name with an emoji must not
+    # 6. Write server.cfg (atomic + UTF-8: a server name with an emoji must not
     #    truncate the config half-way through the write)
     server_cfg = DEFAULT_SERVER_CFG.format(
         hostname=sanitize_cfg_value(cfg["hostname"]),
@@ -1654,7 +1806,7 @@ async def setup_apply(interaction: discord.Interaction, restart: bool = False):
     )
     await asyncio.to_thread(write_text_atomic, SERVER_CFG_PATH, server_cfg)
 
-    # 6. Update NSSM params
+    # 7. Update NSSM params
     nssm_note = ""
     if id_to_folder:
         mod_string = ";".join(sorted(id_to_folder.values()))
@@ -1671,7 +1823,7 @@ async def setup_apply(interaction: discord.Interaction, restart: bool = False):
         ok1 = set_nssm_params(SERVICE_NAME, server_params)
         ok2 = set_nssm_params(HC_SERVICE_NAME, hc_params)
         nssm_note = "NSSM params updated." if ok1 and ok2 else "⚠️ NSSM update failed — check manually!"
-        save_last_setup(id_to_folder, names=cfg["mods"])
+        save_last_setup(id_to_folder, names=cfg["mods"], versions=install["versions"])
         # Keys now match exactly the loaded mod set (stale keys removed)
         await asyncio.to_thread(rebuild_keys, sorted(id_to_folder.values()))
     else:
@@ -1680,13 +1832,29 @@ async def setup_apply(interaction: discord.Interaction, restart: bool = False):
     del pending_setups[interaction.user.id]
     persist_pending()
 
+    refresh_note = ""
+    if install["refreshed"]:
+        refresh_note += (f"**Replaced with the newer download:** "
+                         f"{', '.join(f'`{f}`' for f in install['refreshed'][:15])}"
+                         f"{' …' if len(install['refreshed']) > 15 else ''}\n")
+    if install["notes"]:
+        kept = "\n".join(f"- {n}" for n in install["notes"][:8])
+        more = f"\n...and {len(install['notes']) - 8} more" if len(install["notes"]) > 8 else ""
+        refresh_note += f"⚠️ **Kept as installed (may be outdated):**\n{kept}{more}\n"
+    if restart:
+        next_step = "Restarting now..."
+    elif stopped_for_refresh:
+        next_step = "The server was stopped to replace mods — `/start` to go live."
+    else:
+        next_step = "Restart the server with `/restart` to go live."
     await interaction.followup.send(
-        f"✅ **Setup applied**\n"
-        f"**Backup:** `{os.path.basename(backup_folder)}`\n"
-        f"**Template:** {cfg['template']}\n"
-        f"**Mods installed/present:** {len(installed)}\n"
-        f"{nssm_note}\n\n"
-        + ("Restarting now..." if restart else "Restart the server with `/restart` to go live.")
+        (f"✅ **Setup applied**\n"
+         f"**Backup:** `{os.path.basename(backup_folder)}`\n"
+         f"**Template:** {cfg['template']}\n"
+         f"**Mods installed/present:** {len(installed)}\n"
+         f"{refresh_note}"
+         f"{nssm_note}\n\n"
+         + next_step)[:2000]
     )
     if restart:
         await do_restart(interaction.followup)
@@ -1904,23 +2072,26 @@ async def update(interaction: discord.Interaction, restart: bool = True):
     # 2. Download into the cache (automated route only)
     outdated_ids = [mid for mid, _, _ in outdated]
     if STEAM_USERNAME and os.path.isfile(STEAMCMD):
-        remaining = await run_steamcmd_download(outdated_ids, interaction.followup)
+        stale = await asyncio.to_thread(stale_cache_ids, outdated_ids)
+        remaining = await run_steamcmd_download(outdated_ids, interaction.followup,
+                                                refresh_ids=stale)
         if remaining:
             await interaction.followup.send(
                 f"⚠️ {len(remaining)} mods failed to download — aborting before install. "
                 f"Try `/update` again (SteamCMD login may have expired).")
             return
 
-    # 3. Stop the server before replacing mod folders. A running Arma holds its
-    #    .pbo files open, so installing underneath it either fails outright or
-    #    pulls the addons out from under the live session.
-    was_running = "RUNNING" in await a_service_state(SERVICE_NAME)
+    # 3. Stop the server and the headless client before replacing mod folders.
+    #    Both hold the mod's files open, so installing underneath either one
+    #    fails outright or pulls the addons out from under the live session.
+    was_running = bool(await services_running())
     if was_running:
-        await interaction.followup.send("⏹️ Stopping the server to install the updates...")
+        await interaction.followup.send(
+            "⏹️ Stopping the server and headless client to install the updates...")
         if not await stop_server_and_wait():
             await interaction.followup.send(
-                "⚠️ Server did not stop within 2 minutes — **nothing was installed**. "
-                "Stop it manually and run `/update` again.")
+                "⚠️ Server/headless client did not stop within 2 minutes — **nothing was "
+                "installed**. Stop them with `/stop` and run `/update` again.")
             return
 
     # 4. Install
@@ -1935,8 +2106,9 @@ async def update(interaction: discord.Interaction, restart: bool = True):
         parts.append(f"✅ Updated: {', '.join(f'`{u}`' for u in updated[:15])}")
     if needs_download:
         dl = "\n".join(f"- {m}" for m in needs_download[:10])
-        parts.append(f"⚠️ Not in workshop cache (no `STEAM_USERNAME` for auto-download?) — "
-                     f"run `/setup_script` output on the VM, then `/update` again:\n{dl}")
+        parts.append(f"⚠️ No newer copy in the workshop cache (no `STEAM_USERNAME` for "
+                     f"auto-download?) — run `/setup_script` output on the VM, then "
+                     f"`/update` again:\n{dl}")
     if failed:
         fl = "\n".join(f"- {m}" for m in failed[:10])
         parts.append(f"⛔ **{len(failed)} mods could not be replaced** (their previous copy was "
@@ -1995,7 +2167,7 @@ async def help_cmd(interaction: discord.Interaction):
     dl = "`/download`" if STEAM_USERNAME else "`/setup_script` (run its output on the VM)"
     await interaction.response.send_message(
         "**🖥️ Server management**\n"
-        "`/start` `/stop` `/restart` — control the server (HC restarts automatically)\n"
+        "`/start` `/stop` `/restart` — control the server (the HC stops with it and restarts automatically)\n"
         "`/status` `/uptime` `/players` — monitoring\n\n"
         "**🛠️ New server setup** (in this order)\n"
         f"1. `/setup` — attach your launcher preset `.html` (optional: name, max players)\n"
