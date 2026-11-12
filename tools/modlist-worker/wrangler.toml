@@ -1,0 +1,6 @@
+name = "a3sat-modlist"
+main = "worker.js"
+compatibility_date = "2026-11-01"
+
+[vars]
+ALLOWED_ORIGINS = "https://r1sen18.github.io,http://localhost:*"
