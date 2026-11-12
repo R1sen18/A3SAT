@@ -217,10 +217,22 @@ installed `.pbo` files.
   `3806463703` in `KNOWN_MISSION_TEMPLATES` (or widen the scan). This needs the
   real template name from the owner's server and is **not** part of the first
   build.
-- Status 2026-11-12: `/setup` parsed all 10 mods. The disk estimate was
-  6.2 GB (3.1 GB still to download), and 66 maps were listed, all from the
-  Antistasi Ultimate copy already on disk. Ostmarschen wasn't listed, which is
-  expected while the patch isn't downloaded yet. Re-check after `/download`.
+- Status 2026-11-12: after `/download`, `/setup_map` lists
+  `1400_ad_ostmarschen`, so template detection works and no template fix is
+  needed. But choosing it is **refused**: "`1400_ad_ostmarschen` is not
+  provided by any mod in this setup".
+- **Required fix (terrain check bug):** `world_available` only scans
+  `SERVER_BASE\@Folder` folders. During a pending setup, the new mods exist only
+  in `WORKSHOP_BASE\<id>` until `/setup_apply` copies them over. Older,
+  unrelated `@Folders` from previous setups do exist, so the scan runs, misses
+  the terrain, and returns `False` instead of `None`. The fix: for each mod,
+  scan the installed folder **and** the workshop copy. Also replace the fixed
+  512 KB header read with a real PBO header parse, so a terrain PBO with a
+  large file list can't be missed. Move the terrain logic into a
+  discord-free module so it can be unit-tested.
+- Workaround until then: run `/setup_apply` with a vanilla placeholder map
+  and no restart. Then run `/setup_map map:1400_ad_ostmarschen` against the
+  applied setup, which scans the now-installed folders.
 
 ### Readme additions
 
