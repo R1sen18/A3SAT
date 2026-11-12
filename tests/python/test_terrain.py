@@ -56,11 +56,16 @@ class PboFileNamesTests(unittest.TestCase):
 
 class HugeNameTests(unittest.TestCase):
     def test_pbo_file_names_stops_on_unterminated_huge_name(self):
+        block = struct.pack("<5I", 0, 0, 0, 0, 0)
+        data = (b"config.bin" + bytes(1) + block
+                + b"A" * 5000 + bytes(1) + block
+                + b"worlds/x/x.wrp" + bytes(1) + block
+                + bytes(1) + bytes(20))
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "a.pbo")
             with open(p, "wb") as f:
-                f.write(b"A" * 10000)
-            self.assertEqual(terrain.pbo_file_names(p), [])
+                f.write(data)
+            self.assertEqual(terrain.pbo_file_names(p), ["config.bin"])
 
 
 class WorldAvailableTests(unittest.TestCase):

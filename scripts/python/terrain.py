@@ -27,6 +27,8 @@ def _read_cstring(f) -> bytes:
         if not c or c == b"\0":
             return bytes(out)
         out += c
+        if len(out) > _MAX_NAME:
+            raise _BadHeader
 
 
 def pbo_file_names(path: str) -> list[str]:
